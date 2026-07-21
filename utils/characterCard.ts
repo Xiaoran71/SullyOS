@@ -22,6 +22,7 @@ export const CARD_STRIPPED_FIELDS = [
   'embeddingConfig',
   'proactiveConfig',
   'activeMsg2Config',
+  'shortcutActions',         // iOS 快捷指令名称/链接属于设备本地自动化配置
 
   // 2) 美化
   'embeddedTheme',           // CharacterExportData 上的内嵌主题（导入侧一并剥离）
@@ -59,6 +60,8 @@ export const CARD_STRIPPED_FIELDS = [
   'specialMomentRecords',
   'vrState',
   'chibiStudio',
+  'pendingShortcutAction',   // 未处理弹窗与限流计数只属于当前设备
+  'shortcutActionRuntime',
 ] as const;
 
 /**

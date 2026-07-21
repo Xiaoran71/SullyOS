@@ -10,6 +10,7 @@ describe('stripSensitiveCardFields', () => {
       embeddingConfig: { baseUrl: 'https://x', apiKey: 'sk-SECRET2', model: 'emb', dimensions: 1024 },
       proactiveConfig: { enabled: true, intervalMinutes: 60, secondaryApi: { baseUrl: 'https://x', apiKey: 'sk-SECRET3', model: 'gpt' } },
       activeMsg2Config: { enabled: true, secondaryApi: { apiKey: 'sk-SECRET4' } },
+      shortcutActions: [{ id: 'lock', shortcutUrl: 'shortcuts://run-shortcut?name=私人锁屏' }],
     };
 
     const out = stripSensitiveCardFields(card);
@@ -22,6 +23,7 @@ describe('stripSensitiveCardFields', () => {
     expect(out).not.toHaveProperty('embeddingConfig');
     expect(out).not.toHaveProperty('proactiveConfig');
     expect(out).not.toHaveProperty('activeMsg2Config');
+    expect(out).not.toHaveProperty('shortcutActions');
   });
 
   it('剥离美化 / 语言 / 运行时状态，保留角色本身', () => {

@@ -210,6 +210,8 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
         const char = {
             id: 'ft1', name: '小调', avatar: '',
             chatFineTune: { enabled: true, chatBubbleFontSize: 15, chatAvatarVisibility: 'hide_ai' },
+            shortcutActions: [{ id: 'focus', name: '专注', enabled: true, shortcutName: '番茄钟', popupText: '学习啦', buttonText: '好', description: '', triggerCondition: '', blocking: false, cooldownMinutes: 30, dailyLimit: 3 }],
+            shortcutActionRuntime: { focus: { lastTriggeredAt: 123, dateKey: '2026-07-21', countToday: 1 } },
         };
         const theme = { chatAvatarVisibility: 'hide_both', chatSnapToEdge: true, chatBubbleLineHeight: 1.5, chatEmojiSize: 'large' };
         // 分角色聊天头像（URL 形态）随 user_profile 单例走；data: 形态在 full/media 模式
@@ -226,6 +228,8 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
         await DB.importFullData(data);
         const restored = (await DB.getRawStoreData('characters')).find((c: any) => c.id === 'ft1');
         expect(restored.chatFineTune).toEqual(char.chatFineTune);
+        expect(restored.shortcutActions).toEqual(char.shortcutActions);
+        expect(restored.shortcutActionRuntime).toEqual(char.shortcutActionRuntime);
         const profile = (await DB.getRawStoreData('user_profile'))[0];
         expect(profile.perCharAvatars).toEqual(userProfile.perCharAvatars);
     });
