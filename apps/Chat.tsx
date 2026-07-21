@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallba
 import { createPortal } from 'react-dom';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
+import { Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot, ShortcutActionRule } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
@@ -42,6 +42,9 @@ import Modal from '../components/os/Modal';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
+import ShortcutActionsModal from '../components/chat/ShortcutActionsModal';
+import ShortcutActionOverlay from '../components/chat/ShortcutActionOverlay';
+import { SHORTCUT_ACTION_EVENT, buildShortcutActionUrl, normalizeShortcutActions, recordShortcutActionRuntime } from '../utils/shortcutActions';
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from '../utils/voiceSubtitle';
@@ -167,6 +170,8 @@ const Chat: React.FC = () => {
     const [showProactiveModal, setShowProactiveModal] = useState(false);
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
+    const [showShortcutActionsModal, setShowShortcutActionsModal] = useState(false);
+    const [testShortcutAction, setTestShortcutAction] = useState<{ rule: ShortcutActionRule; createdAt: number } | null>(null);
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{id: string, name: string, content: string}[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -265,6 +270,61 @@ const Chat: React.FC = () => {
         historyContextRange?.userBreakpointExpired,
         updateCharacter,
     ]);
+    useEffect(() => { setTestShortcutAction(null); }, [activeCharacterId]);
+
+    // ChatParser 只发出“已验证的动作 ID”；这里才把弹窗写入角色本地状态。
+    // 这样刷新页面后锁定弹窗仍然存在，同时原版备份（没有这些可选字段）会自然保持无弹窗。
+    useEffect(() => {
+        const onShortcutAction = (event: Event) => {
+            const detail = (event as CustomEvent<{ charId: string; actionId: string; message?: string }>).detail;
+            const currentChar = charRef.current;
+            if (!detail || !currentChar || detail.charId !== currentChar.id || currentChar.pendingShortcutAction) return;
+            const rule = normalizeShortcutActions(currentChar.shortcutActions)
+                .find(item => item.enabled && item.id === detail.actionId);
+            if (!rule) return;
+            updateCharacter(currentChar.id, {
+                pendingShortcutAction: { actionId: rule.id, message: detail.message, createdAt: Date.now() },
+            });
+        };
+        window.addEventListener(SHORTCUT_ACTION_EVENT, onShortcutAction);
+        return () => window.removeEventListener(SHORTCUT_ACTION_EVENT, onShortcutAction);
+    }, [updateCharacter]);
+
+    const configuredShortcutRules = normalizeShortcutActions(char?.shortcutActions);
+    const persistentShortcutRule = char?.pendingShortcutAction
+        ? configuredShortcutRules.find(rule => rule.enabled && rule.id === char.pendingShortcutAction?.actionId)
+        : undefined;
+    const visibleShortcutRule = testShortcutAction?.rule || persistentShortcutRule;
+    const visibleShortcutPending = testShortcutAction
+        ? { actionId: testShortcutAction.rule.id, createdAt: testShortcutAction.createdAt }
+        : char?.pendingShortcutAction;
+
+    const clearShortcutOverlay = () => {
+        if (testShortcutAction) {
+            setTestShortcutAction(null);
+            return;
+        }
+        if (char?.pendingShortcutAction) updateCharacter(char.id, { pendingShortcutAction: undefined });
+    };
+
+    const runVisibleShortcut = () => {
+        if (!char || !visibleShortcutRule) return;
+        try {
+            const url = buildShortcutActionUrl(visibleShortcutRule);
+            if (!testShortcutAction) {
+                updateCharacter(char.id, {
+                    pendingShortcutAction: undefined,
+                    shortcutActionRuntime: recordShortcutActionRuntime(char.shortcutActionRuntime, visibleShortcutRule.id),
+                });
+            } else {
+                setTestShortcutAction(null);
+            }
+            // iOS 要求由用户点击直接发起自定义 scheme；不能由模型或后台静默打开。
+            window.location.href = url;
+        } catch (error: any) {
+            addToast(error?.message || '快捷指令链接无效', 'error');
+        }
+    };
     const currentThemeId = char?.bubbleStyle || 'default';
     // 解析逻辑抽到 utils/groupChat/theme.ts（群聊共用），行为不变
     const activeTheme = useMemo(
@@ -1324,6 +1384,7 @@ const Chat: React.FC = () => {
             case 'chrome-css': setModalType('chrome-css'); break;
             case 'chrome-sound': setModalType('chrome-sound'); break;
             case 'fine-tune': setShowPanel('none'); setFineTuneOpen(true); setFineTunePanelOpen(true); break;
+            case 'shortcut-actions': setShowPanel('none'); setShowShortcutActionsModal(true); break;
             case 'emoji-import': setModalType('emoji-import'); break;
             case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji'); break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
@@ -3535,6 +3596,30 @@ const Chat: React.FC = () => {
 
 
             {/* Proactive Settings Modal */}
+            {char && (
+                <ShortcutActionsModal
+                    isOpen={showShortcutActionsModal}
+                    rules={char.shortcutActions}
+                    onClose={() => setShowShortcutActionsModal(false)}
+                    onSave={(rules) => {
+                        updateCharacter(char.id, { shortcutActions: rules });
+                        addToast('快捷动作已保存', 'success');
+                    }}
+                    onTest={(rule) => setTestShortcutAction({ rule, createdAt: Date.now() })}
+                />
+            )}
+
+            {char && visibleShortcutRule && visibleShortcutPending && createPortal(
+                <ShortcutActionOverlay
+                    char={char}
+                    rule={visibleShortcutRule}
+                    pending={visibleShortcutPending}
+                    onRun={runVisibleShortcut}
+                    onEmergencyUnlock={clearShortcutOverlay}
+                />,
+                document.body,
+            )}
+
             {char && (
                 <ProactiveSettingsModal
                     isOpen={showProactiveModal}

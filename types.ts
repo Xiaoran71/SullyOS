@@ -2334,6 +2334,12 @@ export interface CharacterProfile {
   avatar: string;
   description: string;
   systemPrompt: string;
+  /** 用户预先授权的 iOS 快捷动作。旧备份缺省时等价于空数组。 */
+  shortcutActions?: ShortcutActionRule[];
+  /** 尚未由用户处理的动作弹窗。随角色备份，刷新后仍保持锁定。 */
+  pendingShortcutAction?: PendingShortcutAction;
+  /** 冷却与每日次数，仅由前端维护，模型不可修改。 */
+  shortcutActionRuntime?: Record<string, ShortcutActionRuntime>;
   worldview?: string;
   /** 角色分组：指向 CharacterGroup.id；空或指向已删分组 = 未分组。仅本地组织用，不随角色卡导出 */
   groupId?: string;
@@ -2622,6 +2628,34 @@ export interface CharacterProfile {
    * 独立于 proactiveConfig（主动发消息），互不挤占触发。
    */
   vrState?: VRWorldCharState;
+}
+
+export interface ShortcutActionRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  triggerCondition: string;
+  shortcutName: string;
+  shortcutUrl?: string;
+  popupText: string;
+  buttonText: string;
+  allowAiMessage?: boolean;
+  blocking: boolean;
+  cooldownMinutes: number;
+  dailyLimit: number;
+}
+
+export interface PendingShortcutAction {
+  actionId: string;
+  message?: string;
+  createdAt: number;
+}
+
+export interface ShortcutActionRuntime {
+  lastTriggeredAt?: number;
+  dateKey?: string;
+  countToday?: number;
 }
 
 /**

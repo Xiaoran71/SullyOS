@@ -6,6 +6,12 @@ import { sanitizeForBubble } from './sanitize';
 import { extractTransferCommands } from './transferFormat';
 import { executeLifeDirectives } from './lifeRecords';
 import { wallClockToTimestamp } from './timezone';
+import {
+    getShortcutActionAvailability,
+    normalizeShortcutActions,
+    SHORTCUT_ACTION_EVENT,
+    SHORTCUT_ACTION_TAG_RE,
+} from './shortcutActions';
 
 export interface MusicActionSnapshot {
     songId: number;
@@ -164,6 +170,36 @@ export const ChatParser = {
             // 卡片自己的字段优先，inheritMeta 只补它没有的键（两边键名本来就不重叠，这里是防御）
             ...(inheritMeta ? { metadata: { ...inheritMeta, ...(msg.metadata || {}) } } : {}),
         });
+
+        // SHORTCUT_ACTION — 模型只能请求角色档案中已启用的动作 ID；URL 始终由前端配置提供。
+        // 每条回复至多处理第一个合法请求，其余标签全部剥除，避免一轮弹多次。
+        const shortcutMatches = Array.from(content.matchAll(new RegExp(SHORTCUT_ACTION_TAG_RE.source, 'g')));
+        if (shortcutMatches.length > 0) {
+            try {
+                const profile = (await DB.getAllCharacters()).find(c => c.id === charId);
+                if (profile && !profile.pendingShortcutAction) {
+                    for (const match of shortcutMatches) {
+                        const actionId = match[1];
+                        const rule = normalizeShortcutActions(profile.shortcutActions).find(r => r.id === actionId);
+                        if (!rule) continue;
+                        const availability = getShortcutActionAvailability(rule, profile.shortcutActionRuntime?.[actionId]);
+                        if (!availability.allowed) continue;
+                        const requestedLine = rule.allowAiMessage
+                            ? String(match[2] || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80)
+                            : '';
+                        if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent(SHORTCUT_ACTION_EVENT, {
+                                detail: { charId, actionId, message: requestedLine || undefined },
+                            }));
+                        }
+                        break;
+                    }
+                }
+            } catch (e) {
+                console.warn('[ShortcutAction] parse failed:', e);
+            }
+            content = content.replace(new RegExp(SHORTCUT_ACTION_TAG_RE.source, 'g'), '').trim();
+        }
 
         // POKE
         if (content.includes('[[ACTION:POKE]]')) {
