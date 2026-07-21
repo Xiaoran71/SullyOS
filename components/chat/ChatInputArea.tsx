@@ -626,7 +626,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             {actionsContent}
                         </div>
                     )}
-                    {/* Actions Panel (paginated: page 0 = 内置功能, page 1 = 外部服务, page 2 = 更多) */}
+                    {/* Actions Panel：三页分组，每页固定最多 2 行 × 4 列。 */}
                     {showPanel === 'actions' && !actionsContent && (
                         <div
                             className="overflow-y-auto no-scrollbar"
@@ -706,15 +706,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
                           {/* Page 1: 外部服务 */}
                           <div className={`p-6 grid grid-cols-4 gap-8 ${actionsPage === 1 ? '' : 'hidden'}`}>
-                            <button
-                              onClick={() => onPanelAction('shortcut-actions')}
-                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
-                            >
-                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-amber-300 border-amber-400/20' : 'bg-amber-50 text-amber-500 border-amber-100'}`}>
-                                <Lightning className="w-6 h-6" weight="fill" />
-                              </div>
-                              <span className="text-xs font-bold">快捷动作</span>
-                            </button>
                             {/* Proactive Message Button（从第一页移到第二页） */}
                             <button onClick={() => onPanelAction('proactive')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform relative ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
                                 {acnh ? <AcnhActionTile kind="proactive" /> : (
@@ -842,6 +833,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                   <BellSimpleRinging className="w-6 h-6" weight="bold" />
                               </div>
                               <span className="text-xs font-bold">提示音</span>
+                            </button>
+                            <button
+                              onClick={() => onPanelAction('shortcut-actions')}
+                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
+                            >
+                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-amber-300 border-amber-400/20' : 'bg-amber-50 text-amber-500 border-amber-100'}`}>
+                                <Lightning className="w-6 h-6" weight="fill" />
+                              </div>
+                              <span className="text-xs font-bold">快捷动作</span>
                             </button>
 
                             {/* 记忆链接与提示音同级：都是聊天工具入口，不单独占一整块。 */}
