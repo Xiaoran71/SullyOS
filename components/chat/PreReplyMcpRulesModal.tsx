@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../os/Modal';
-import type { PreReplyMcpRule } from '../../types';
+import type { PreReplyMcpRule, TemporaryPreReplyMcpSession } from '../../types';
 import { callMcpTool, loadMcpServers } from '../../utils/mcpClient';
 import {
   DEFAULT_PRE_REPLY_MCP_PROMPT,
@@ -11,18 +11,20 @@ import {
 interface Props {
   isOpen: boolean;
   rules?: PreReplyMcpRule[];
+  sessions?: TemporaryPreReplyMcpSession[];
   onClose: () => void;
   onSave: (rules: PreReplyMcpRule[]) => void;
+  onStopSession: (ruleId: string) => void;
 }
 
 const newRule = (): PreReplyMcpRule => ({
   id: `pre_mcp_${Date.now()}`,
-  name: '回复前检查', enabled: true, serverId: '', toolName: '', argumentsJson: '{}',
+  name: '回复前检查', activationDescription: '当用户明确要求在一段时间内持续检查这类数据时，可以提议临时开启。', enabled: true, serverId: '', toolName: '', argumentsJson: '{}',
   promptTemplate: DEFAULT_PRE_REPLY_MCP_PROMPT, maxResultChars: 8000,
   minIntervalMinutes: 0, activeTimeStart: '', activeTimeEnd: '', onFailure: 'continue',
 });
 
-const PreReplyMcpRulesModal: React.FC<Props> = ({ isOpen, rules, onClose, onSave }) => {
+const PreReplyMcpRulesModal: React.FC<Props> = ({ isOpen, rules, sessions, onClose, onSave, onStopSession }) => {
   const [draft, setDraft] = useState<PreReplyMcpRule[]>([]);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [preview, setPreview] = useState('');
@@ -76,15 +78,25 @@ const PreReplyMcpRulesModal: React.FC<Props> = ({ isOpen, rules, onClose, onSave
   </>}>
     <div className="space-y-4">
       <div className="rounded-2xl bg-violet-50 p-3 text-[11px] leading-relaxed text-violet-700">
-        每次你主动触发普通私聊回复时，前端会先直接调用这里指定的工具，再把结果作为本轮临时上下文交给角色。不会伪造用户消息，也不会把原始结果写进聊天记录。自动调用前请确认工具是只读的，或确实允许它自动执行。
+        打开“永久启用”时，每次你主动触发普通私聊回复都会调用；关闭后规则仍保留，角色可在你口头要求持续监控时提出限时开启，并由你确认。不会伪造用户消息，也不会把原始结果写进聊天记录。自动调用前请确认工具是只读的，或确实允许它自动执行。
       </div>
       {!servers.length && <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-700">还没有可用服务器。请先到“设置 → MCP 工具服务器”添加服务器、测试连接并启用。</div>}
+      {(sessions || []).filter(session => session.expiresAt > Date.now()).length > 0 && <div className="space-y-2 rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+        <div className="text-xs font-bold text-emerald-700">正在临时监控</div>
+        {(sessions || []).filter(session => session.expiresAt > Date.now()).map(session => {
+          const activeRule = draft.find(rule => rule.id === session.ruleId);
+          return <div key={session.ruleId} className="flex items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2">
+            <div className="min-w-0"><div className="truncate text-xs font-bold text-slate-700">{activeRule?.name || session.ruleId}</div><div className="text-[10px] text-slate-400">到 {new Date(session.expiresAt).toLocaleString()} 自动结束</div></div>
+            <button onClick={() => onStopSession(session.ruleId)} className="shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-500">立即停止</button>
+          </div>;
+        })}
+      </div>}
       {draft.map((rule, index) => {
         const server = servers.find(item => item.id === rule.serverId);
         return <section key={rule.id} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
           <div className="flex items-center gap-2">
             <input value={rule.name} onChange={event => patch(index, { name: event.target.value })} className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold" placeholder="规则名称" />
-            <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={rule.enabled} onChange={event => patch(index, { enabled: event.target.checked })}/>启用</label>
+            <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={rule.enabled} onChange={event => patch(index, { enabled: event.target.checked })}/>永久启用</label>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <select value={rule.serverId} onChange={event => {
@@ -97,6 +109,9 @@ const PreReplyMcpRulesModal: React.FC<Props> = ({ isOpen, rules, onClose, onSave
               <option value="">选择工具</option>{(server?.tools || []).map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}
             </select>
           </div>
+          <label className="block text-[10px] font-bold text-slate-500">给角色看的临时开启条件
+            <textarea value={rule.activationDescription || ''} onChange={event => patch(index, { activationDescription: event.target.value })} rows={2} className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs" placeholder="例如：用户要求监督手机使用一段时间时，可以提议开启。" />
+          </label>
           {server?.tools?.find(tool => tool.name === rule.toolName)?.description && <p className="text-[10px] leading-relaxed text-slate-400">{server.tools.find(tool => tool.name === rule.toolName)?.description}</p>}
           {server?.tools?.find(tool => tool.name === rule.toolName)?.inputSchema && <details className="rounded-xl bg-white px-3 py-2 text-[10px] text-slate-500">
             <summary className="cursor-pointer font-bold">查看工具参数格式</summary>

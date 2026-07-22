@@ -151,6 +151,7 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
             shortcutActions: [{ id: 'focus', name: '专注', enabled: true, shortcutName: '番茄钟', popupText: '学习啦', buttonText: '好', description: '', triggerCondition: '', blocking: false, cooldownMinutes: 30, dailyLimit: 3 }],
             shortcutActionRuntime: { focus: { lastTriggeredAt: 123, dateKey: '2026-07-21', countToday: 1 } },
             preReplyMcpRules: [{ id: 'usage', name: '检查手机', enabled: true, serverId: 'mcp1', toolName: 'query_events', argumentsJson: '{"hours":6}', promptTemplate: '{{result}}', maxResultChars: 8000, minIntervalMinutes: 0, onFailure: 'continue' }],
+            temporaryPreReplyMcpSessions: [{ ruleId: 'usage', startedAt: 100, expiresAt: 9999999999999 }],
         };
         const theme = { chatAvatarVisibility: 'hide_both', chatSnapToEdge: true, chatBubbleLineHeight: 1.5, chatEmojiSize: 'large' };
         // 分角色聊天头像（URL 形态）随 user_profile 单例走；data: 形态在 full/media 模式
@@ -170,6 +171,7 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
         expect(restored.shortcutActions).toEqual(char.shortcutActions);
         expect(restored.shortcutActionRuntime).toEqual(char.shortcutActionRuntime);
         expect(restored.preReplyMcpRules).toEqual(char.preReplyMcpRules);
+        expect(restored.temporaryPreReplyMcpSessions).toEqual(char.temporaryPreReplyMcpSessions);
         const profile = (await DB.getRawStoreData('user_profile'))[0];
         expect(profile.perCharAvatars).toEqual(userProfile.perCharAvatars);
     });

@@ -8,10 +8,13 @@ vi.mock('./mcpClient', () => ({ callMcpTool, loadMcpServers }));
 
 import {
   clearPreReplyMcpCache,
+  buildPreReplyMcpProposalPrompt,
   isPreReplyMcpRuleActiveNow,
+  isPreReplyMcpRuleEnabledForCharacter,
   normalizePreReplyMcpRules,
   parsePreReplyMcpArguments,
   runPreReplyMcpRules,
+  PRE_REPLY_MCP_PROPOSAL_TAG_RE,
 } from './preReplyMcp';
 import type { CharacterProfile, PreReplyMcpRule } from '../types';
 
@@ -47,6 +50,40 @@ describe('preReplyMcp', () => {
     expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '08:00', activeTimeEnd: '20:00' }), new Date(2026, 6, 22, 12))).toBe(true);
     expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '22:00', activeTimeEnd: '06:00' }), new Date(2026, 6, 22, 23))).toBe(true);
     expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '22:00', activeTimeEnd: '06:00' }), new Date(2026, 6, 22, 12))).toBe(false);
+  });
+
+  it('临时会话只在确认后的有效期内启用关闭规则', () => {
+    const disabled = rule({ enabled: false });
+    const now = Date.parse('2026-07-22T12:00:00');
+    expect(isPreReplyMcpRuleEnabledForCharacter(char([disabled]), disabled, now)).toBe(false);
+    const active = { ...char([disabled]), temporaryPreReplyMcpSessions: [{ ruleId: disabled.id, startedAt: now - 1000, expiresAt: now + 1000 }] };
+    expect(isPreReplyMcpRuleEnabledForCharacter(active, disabled, now)).toBe(true);
+    expect(isPreReplyMcpRuleEnabledForCharacter(active, disabled, now + 2000)).toBe(false);
+  });
+
+  it('给角色的提议协议只公开关闭规则的 ID/用途，不公开参数或服务器', () => {
+    const prompt = buildPreReplyMcpProposalPrompt(char([
+      rule({ enabled: false, activationDescription: '监督手机使用' }),
+      rule({ id: 'always', enabled: true, argumentsJson: '{"secret":"x"}' }),
+    ]));
+    expect(prompt).toContain('ID=usage');
+    expect(prompt).toContain('监督手机使用');
+    expect(prompt).not.toContain('ID=always');
+    expect(prompt).not.toContain('secret');
+    const match = '[[MCP_MONITOR:usage|180|接下来我会看着你。]]'.match(PRE_REPLY_MCP_PROPOSAL_TAG_RE);
+    expect(match).not.toBeNull();
+  });
+
+  it('关闭规则仅在临时会话有效时执行', async () => {
+    callMcpTool.mockResolvedValue({ success: true, data: '临时数据' });
+    const disabled = rule({ enabled: false });
+    const now = new Date(2026, 6, 22, 12);
+    await runPreReplyMcpRules(char([disabled]), undefined, now);
+    expect(callMcpTool).not.toHaveBeenCalled();
+    const active = { ...char([disabled]), temporaryPreReplyMcpSessions: [{ ruleId: disabled.id, startedAt: now.getTime() - 1, expiresAt: now.getTime() + 60_000 }] };
+    const result = await runPreReplyMcpRules(active, undefined, now);
+    expect(callMcpTool).toHaveBeenCalledTimes(1);
+    expect(result.context).toContain('临时数据');
   });
 
   it('在回复前直接调用白名单工具并渲染本轮上下文', async () => {

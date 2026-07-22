@@ -2342,6 +2342,8 @@ export interface CharacterProfile {
   shortcutActionRuntime?: Record<string, ShortcutActionRuntime>;
   /** 用户主动触发普通私聊回复前，自动执行的只读/已授权 MCP 工具规则。 */
   preReplyMcpRules?: PreReplyMcpRule[];
+  /** 经用户确认后临时生效的规则，到期自动忽略；不改变规则的永久开关。 */
+  temporaryPreReplyMcpSessions?: TemporaryPreReplyMcpSession[];
   worldview?: string;
   /** 角色分组：指向 CharacterGroup.id；空或指向已删分组 = 未分组。仅本地组织用，不随角色卡导出 */
   groupId?: string;
@@ -2663,6 +2665,8 @@ export interface ShortcutActionRuntime {
 export interface PreReplyMcpRule {
   id: string;
   name: string;
+  /** 给角色看的自然语言用途与何时可提议临时开启。 */
+  activationDescription?: string;
   enabled: boolean;
   serverId: string;
   toolName: string;
@@ -2677,6 +2681,12 @@ export interface PreReplyMcpRule {
   activeTimeEnd?: string;
   /** 失败时继续回复（默认）或中止本轮，避免在关键数据缺失时乱答。 */
   onFailure: 'continue' | 'abort';
+}
+
+export interface TemporaryPreReplyMcpSession {
+  ruleId: string;
+  startedAt: number;
+  expiresAt: number;
 }
 
 /**

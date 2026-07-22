@@ -45,6 +45,8 @@ import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettings
 import ShortcutActionsModal from '../components/chat/ShortcutActionsModal';
 import ShortcutActionOverlay from '../components/chat/ShortcutActionOverlay';
 import PreReplyMcpRulesModal from '../components/chat/PreReplyMcpRulesModal';
+import PreReplyMcpProposalModal from '../components/chat/PreReplyMcpProposalModal';
+import { normalizePreReplyMcpRules, PRE_REPLY_MCP_PROPOSAL_EVENT } from '../utils/preReplyMcp';
 import { SHORTCUT_ACTION_EVENT, buildShortcutActionUrl, normalizeShortcutActions, recordShortcutActionRuntime } from '../utils/shortcutActions';
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
@@ -173,6 +175,7 @@ const Chat: React.FC = () => {
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
     const [showShortcutActionsModal, setShowShortcutActionsModal] = useState(false);
     const [showPreReplyMcpModal, setShowPreReplyMcpModal] = useState(false);
+    const [preReplyMcpProposal, setPreReplyMcpProposal] = useState<{ ruleId: string; durationMinutes: number; message?: string } | null>(null);
     const [testShortcutAction, setTestShortcutAction] = useState<{ rule: ShortcutActionRule; createdAt: number } | null>(null);
 
     // Archive Prompts State
@@ -273,6 +276,7 @@ const Chat: React.FC = () => {
         updateCharacter,
     ]);
     useEffect(() => { setTestShortcutAction(null); }, [activeCharacterId]);
+    useEffect(() => { setPreReplyMcpProposal(null); }, [activeCharacterId]);
 
     // ChatParser 只发出“已验证的动作 ID”；这里才把弹窗写入角色本地状态。
     // 这样刷新页面后锁定弹窗仍然存在，同时原版备份（没有这些可选字段）会自然保持无弹窗。
@@ -291,6 +295,24 @@ const Chat: React.FC = () => {
         window.addEventListener(SHORTCUT_ACTION_EVENT, onShortcutAction);
         return () => window.removeEventListener(SHORTCUT_ACTION_EVENT, onShortcutAction);
     }, [updateCharacter]);
+
+    useEffect(() => {
+        const onProposal = (event: Event) => {
+            const detail = (event as CustomEvent<{ charId: string; ruleId: string; durationMinutes: number; message?: string }>).detail;
+            const currentChar = charRef.current;
+            if (!detail || !currentChar || detail.charId !== currentChar.id) return;
+            const ruleExists = normalizePreReplyMcpRules(currentChar.preReplyMcpRules)
+                .some(rule => !rule.enabled && rule.id === detail.ruleId);
+            if (!ruleExists) return;
+            setPreReplyMcpProposal({
+                ruleId: detail.ruleId,
+                durationMinutes: Math.min(10_080, Math.max(1, detail.durationMinutes)),
+                message: detail.message,
+            });
+        };
+        window.addEventListener(PRE_REPLY_MCP_PROPOSAL_EVENT, onProposal);
+        return () => window.removeEventListener(PRE_REPLY_MCP_PROPOSAL_EVENT, onProposal);
+    }, []);
 
     const configuredShortcutRules = normalizeShortcutActions(char?.shortcutActions);
     const persistentShortcutRule = char?.pendingShortcutAction
@@ -3616,13 +3638,46 @@ const Chat: React.FC = () => {
                 <PreReplyMcpRulesModal
                     isOpen={showPreReplyMcpModal}
                     rules={char.preReplyMcpRules}
+                    sessions={char.temporaryPreReplyMcpSessions}
                     onClose={() => setShowPreReplyMcpModal(false)}
                     onSave={(rules) => {
                         updateCharacter(char.id, { preReplyMcpRules: rules });
                         addToast('回复前自动 MCP 规则已保存', 'success');
                     }}
+                    onStopSession={(ruleId) => {
+                        updateCharacter(char.id, {
+                            temporaryPreReplyMcpSessions: (char.temporaryPreReplyMcpSessions || []).filter(session => session.ruleId !== ruleId),
+                        });
+                        addToast('临时监控已停止', 'info');
+                    }}
                 />
             )}
+
+            {char && preReplyMcpProposal && (() => {
+                const rule = normalizePreReplyMcpRules(char.preReplyMcpRules).find(item => item.id === preReplyMcpProposal.ruleId);
+                if (!rule) return null;
+                return <PreReplyMcpProposalModal
+                    char={char}
+                    rule={rule}
+                    durationMinutes={preReplyMcpProposal.durationMinutes}
+                    message={preReplyMcpProposal.message}
+                    onClose={() => setPreReplyMcpProposal(null)}
+                    onConfirm={() => {
+                        const now = Date.now();
+                        const sessions = (char.temporaryPreReplyMcpSessions || [])
+                            .filter(session => session.expiresAt > now && session.ruleId !== rule.id);
+                        updateCharacter(char.id, {
+                            temporaryPreReplyMcpSessions: [...sessions, {
+                                ruleId: rule.id,
+                                startedAt: now,
+                                expiresAt: now + preReplyMcpProposal.durationMinutes * 60_000,
+                            }],
+                        });
+                        setPreReplyMcpProposal(null);
+                        addToast(`“${rule.name}”已临时开启`, 'success');
+                    }}
+                />;
+            })()}
 
             {char && visibleShortcutRule && visibleShortcutPending && createPortal(
                 <ShortcutActionOverlay

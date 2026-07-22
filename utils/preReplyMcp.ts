@@ -7,11 +7,15 @@ export const DEFAULT_PRE_REPLY_MCP_PROMPT = `以下是回复前刚刚自动读�
 
 {{result}}`;
 
+export const PRE_REPLY_MCP_PROPOSAL_EVENT = 'sully-pre-reply-mcp-proposal';
+export const PRE_REPLY_MCP_PROPOSAL_TAG_RE = /\[\[MCP_MONITOR:\s*([a-zA-Z0-9_-]+)\|(\d{1,5})(?:\|([^\]]{0,160}))?\]\]/g;
+
 export const normalizePreReplyMcpRules = (rules?: PreReplyMcpRule[]): PreReplyMcpRule[] => {
   if (!Array.isArray(rules)) return [];
   return rules.filter(rule => rule && typeof rule.id === 'string').map(rule => ({
     ...rule,
     enabled: rule.enabled !== false,
+    activationDescription: (rule.activationDescription || '').trim(),
     argumentsJson: typeof rule.argumentsJson === 'string' ? rule.argumentsJson : '{}',
     promptTemplate: (rule.promptTemplate || DEFAULT_PRE_REPLY_MCP_PROMPT).trim(),
     maxResultChars: Math.min(30_000, Math.max(500, Number(rule.maxResultChars) || 8_000)),
@@ -41,6 +45,29 @@ export function isPreReplyMcpRuleActiveNow(rule: PreReplyMcpRule, now = new Date
   if (startMin == null || endMin == null || startMin === endMin) return true;
   const current = now.getHours() * 60 + now.getMinutes();
   return startMin < endMin ? current >= startMin && current < endMin : current >= startMin || current < endMin;
+}
+
+export function isPreReplyMcpRuleEnabledForCharacter(
+  char: CharacterProfile,
+  rule: PreReplyMcpRule,
+  now = Date.now(),
+): boolean {
+  if (rule.enabled) return true;
+  return (char.temporaryPreReplyMcpSessions || []).some(session =>
+    session.ruleId === rule.id && session.startedAt <= now && session.expiresAt > now,
+  );
+}
+
+/** 告诉角色它只能“提议”临时开启既有规则；真正授权由前端确认卡完成。 */
+export function buildPreReplyMcpProposalPrompt(char: CharacterProfile): string {
+  const rules = normalizePreReplyMcpRules(char.preReplyMcpRules).filter(rule => !rule.enabled);
+  if (!rules.length) return '';
+  const lines = rules.map(rule => `- ID=${rule.id}；名称=${rule.name}；用途=${rule.activationDescription || `临时执行 ${rule.toolName}`}；工具=${rule.toolName}`);
+  return `\n\n### 临时 MCP 监控提议
+当用户明确要求你在未来一段时间持续检查某类外部数据时，你可以提议临时开启下面已有规则。你不能创建规则、修改工具或参数，也不能自行授权。
+${lines.join('\n')}
+仅在用户明确表达持续监控意图时输出一次：[[MCP_MONITOR:规则ID|持续分钟数|确认卡上的一句话]]
+持续分钟数必须忠实换算用户说的时长；未说明时先询问，不要猜。前端会要求用户再次确认。普通闲聊不要输出。`;
 }
 
 const cache = new Map<string, { at: number; block: string }>();
@@ -78,7 +105,8 @@ export async function runPreReplyMcpRules(
   onStatus?: (text: string) => void,
   now = new Date(),
 ): Promise<PreReplyMcpRunResult> {
-  const rules = normalizePreReplyMcpRules(char.preReplyMcpRules).filter(rule => rule.enabled);
+  const rules = normalizePreReplyMcpRules(char.preReplyMcpRules)
+    .filter(rule => isPreReplyMcpRuleEnabledForCharacter(char, rule, now.getTime()));
   const servers = loadMcpServers();
   const blocks: string[] = [];
   const errors: string[] = [];
