@@ -2681,6 +2681,8 @@ export interface PreReplyMcpRule {
   activeTimeEnd?: string;
   /** 失败时继续回复（默认）或中止本轮，避免在关键数据缺失时乱答。 */
   onFailure: 'continue' | 'abort';
+  /** 默认 false：交给自动规则专用，不再同时暴露给模型的普通 MCP 工具调用。 */
+  allowManualModelCall?: boolean;
 }
 
 export interface TemporaryPreReplyMcpSession {

@@ -17,7 +17,7 @@ import {
     MCP_REQUEST_TIMEOUT_MS,
     type McpServerConfig,
 } from './mcpClient';
-import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, formatMcpToolResult, MCP_RESULT_MAX_CHARS, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls } from './mcpToolBridge';
+import { buildMcpOpenAITools, buildMcpSystemBlock, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, formatMcpToolResult, MCP_RESULT_MAX_CHARS, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls } from './mcpToolBridge';
 import { completeGroupChatWithMcp } from './groupChat/mcp';
 
 const mkServer = (over: Partial<McpServerConfig>): McpServerConfig => ({
@@ -215,6 +215,18 @@ describe('buildMcpOpenAITools', () => {
         // 单服务器可见时描述不带 [来源] 前缀（multi 按角色可见数算）
         expect(buildMcpOpenAITools('char_b').tools[0].function.description).not.toContain('[通用]');
         expect(buildMcpOpenAITools('char_a').tools[0].function.description).toContain('[通用]');
+    });
+
+    it('可按服务器+工具精确排除自动规则接管的工具', () => {
+        const server = mkServer({ id: 'device', name: '设备', tools: [{ name: 'query_events' }, { name: 'list_event_types' }] });
+        saveMcpServers([server]);
+        const excluded = [{ serverId: 'device', toolName: 'query_events' }];
+        const { tools, resolve } = buildMcpOpenAITools(undefined, excluded);
+        expect(tools.map(tool => tool.function.name)).toEqual(['list_event_types']);
+        expect(resolve.has('query_events')).toBe(false);
+        const prompt = buildMcpSystemBlock('用户', undefined, excluded);
+        expect(prompt).not.toContain('query_events');
+        expect(prompt).toContain('list_event_types');
     });
 });
 

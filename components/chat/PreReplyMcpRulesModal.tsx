@@ -129,6 +129,10 @@ const PreReplyMcpRulesModal: React.FC<Props> = ({ isOpen, rules, sessions, onClo
             <label className="text-[10px] font-bold text-slate-500">最大字符<input type="number" min="500" max="30000" value={rule.maxResultChars} onChange={event => patch(index, { maxResultChars: Number(event.target.value) })} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs" /></label>
             <label className="text-[10px] font-bold text-slate-500">失败时<select value={rule.onFailure} onChange={event => patch(index, { onFailure: event.target.value as 'continue' | 'abort' })} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-1 py-2 text-xs"><option value="continue">继续</option><option value="abort">中止</option></select></label>
           </div>
+          <label className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-700">
+            <input type="checkbox" checked={!!rule.allowManualModelCall} onChange={event => patch(index, { allowManualModelCall: event.target.checked })} className="mt-0.5" />
+            <span><b>仍允许角色普通调用此工具</b><br/>默认关闭：该工具只受这条自动规则控制，停止监控后角色不会绕过规则自行查询。只有确实需要保留原版自由调用时才开启。</span>
+          </label>
           <label className="block text-[10px] font-bold text-slate-500">给角色的提示词
             <textarea value={rule.promptTemplate} onChange={event => patch(index, { promptTemplate: event.target.value })} rows={6} className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed" />
             <span className="mt-1 block font-normal text-slate-400">可用：{'{{result}}'} {'{{server}}'} {'{{tool}}'} {'{{time}}'}</span>

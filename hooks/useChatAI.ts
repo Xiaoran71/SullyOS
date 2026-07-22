@@ -24,7 +24,7 @@ import { MCD_PROPOSE_TOOL, autoFixProposalCodesByName } from '../utils/mcdToolBr
 import { LUCKIN_PROPOSE_TOOL, autoFixProposalCodesByName as autoFixLuckinProposalCodesByName, fetchOpenAIToolsForLuckin, inferCardKind as inferLuckinCardKind } from '../utils/luckinToolBridge';
 import { callLuckinTool } from '../utils/luckinMcpClient';
 import { callMcpTool, getMcpUseNativeTools } from '../utils/mcpClient';
-import { runPreReplyMcpRules } from '../utils/preReplyMcp';
+import { getPreReplyMcpReservedTools, runPreReplyMcpRules } from '../utils/preReplyMcp';
 import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, extractTextFakedMcpCalls, formatMcpToolResult, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls, type FakedMcpCall } from '../utils/mcpToolBridge';
 import { buildToolResultMessage, normalizeToolCallsForCompat } from '../utils/toolCallCompat';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
@@ -1008,7 +1008,7 @@ export const useChatAI = ({
             // 工具清单读的是设置里持久化的发现结果, 不发网络请求。
             let mcpToolResolve: ReturnType<typeof buildMcpOpenAITools>['resolve'] | null = null;
             if (payload.flags.mcpChatActive) {
-                const { tools: mcpTools, resolve } = buildMcpOpenAITools(char.id);
+                const { tools: mcpTools, resolve } = buildMcpOpenAITools(char.id, getPreReplyMcpReservedTools(charForGen));
                 if (mcpTools.length) {
                     mcpToolResolve = resolve;
                     const mcpOnly = !payload.flags.luckinChatActive && !payload.flags.mcdActive && !payload.flags.luckinActive;

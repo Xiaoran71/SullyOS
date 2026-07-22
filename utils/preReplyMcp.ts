@@ -21,8 +21,29 @@ export const normalizePreReplyMcpRules = (rules?: PreReplyMcpRule[]): PreReplyMc
     maxResultChars: Math.min(30_000, Math.max(500, Number(rule.maxResultChars) || 8_000)),
     minIntervalMinutes: Math.max(0, Number(rule.minIntervalMinutes) || 0),
     onFailure: rule.onFailure === 'abort' ? 'abort' : 'continue',
+    allowManualModelCall: !!rule.allowManualModelCall,
   }));
 };
+
+export interface PreReplyMcpToolRef { serverId: string; toolName: string }
+
+/**
+ * 自动规则默认独占其工具，防止“停止自动监控”后模型又走原版普通 MCP 自行调用。
+ * 同一工具若有任一规则明确允许普通调用，则不做排除。
+ */
+export function getPreReplyMcpReservedTools(char: CharacterProfile): PreReplyMcpToolRef[] {
+  const rules = normalizePreReplyMcpRules(char.preReplyMcpRules);
+  const allowed = new Set(rules.filter(rule => rule.allowManualModelCall).map(rule => `${rule.serverId}\0${rule.toolName}`));
+  const seen = new Set<string>();
+  const refs: PreReplyMcpToolRef[] = [];
+  for (const rule of rules) {
+    const key = `${rule.serverId}\0${rule.toolName}`;
+    if (!rule.serverId || !rule.toolName || allowed.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ serverId: rule.serverId, toolName: rule.toolName });
+  }
+  return refs;
+}
 
 export function parsePreReplyMcpArguments(json: string): Record<string, unknown> {
   const value = JSON.parse((json || '').trim() || '{}');

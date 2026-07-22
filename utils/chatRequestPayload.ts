@@ -21,8 +21,8 @@ import { buildMcdMiniAppContextBlock } from './mcdToolBridge';
 import type { McdMiniAppSnapshot } from './mcdToolBridge';
 import { buildLuckinMiniAppContextBlock, buildLuckinChatSystemBlock } from './luckinToolBridge';
 import type { LuckinMiniAppSnapshot, LuckinChatState } from './luckinToolBridge';
-import { isMcpChatAvailable } from './mcpClient';
-import { buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
+import { buildMcpOpenAITools, buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
+import { getPreReplyMcpReservedTools } from './preReplyMcp';
 import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChange } from '../context/MusicContext';
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
@@ -351,9 +351,10 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // ── 9d. 通用 MCP 工具模式 (用户自配的远程 MCP 服务器, 见 docs/mcp-client.md) ──
     // 工具清单来自持久化的发现结果，变化很慢 → 稳定段。
-    const mcpChatActive = isMcpChatAvailable(char.id);
+    const reservedMcpTools = getPreReplyMcpReservedTools(char);
+    const mcpChatActive = buildMcpOpenAITools(char.id, reservedMcpTools).tools.length > 0;
     if (mcpChatActive) {
-        const block = buildMcpSystemBlock(userProfile?.name || '用户', char.id);
+        const block = buildMcpSystemBlock(userProfile?.name || '用户', char.id, reservedMcpTools);
         if (block) {
             systemPrompt += block;
         }

@@ -9,6 +9,7 @@ vi.mock('./mcpClient', () => ({ callMcpTool, loadMcpServers }));
 import {
   clearPreReplyMcpCache,
   buildPreReplyMcpProposalPrompt,
+  getPreReplyMcpReservedTools,
   isPreReplyMcpRuleActiveNow,
   isPreReplyMcpRuleEnabledForCharacter,
   normalizePreReplyMcpRules,
@@ -72,6 +73,11 @@ describe('preReplyMcp', () => {
     expect(prompt).not.toContain('secret');
     const match = '[[MCP_MONITOR:usage|180|接下来我会看着你。]]'.match(PRE_REPLY_MCP_PROPOSAL_TAG_RE);
     expect(match).not.toBeNull();
+  });
+
+  it('自动规则默认独占工具，只有明确允许时才继续暴露给模型', () => {
+    expect(getPreReplyMcpReservedTools(char([rule()]))).toEqual([{ serverId: 'server-1', toolName: 'query_events' }]);
+    expect(getPreReplyMcpReservedTools(char([rule({ allowManualModelCall: true })]))).toEqual([]);
   });
 
   it('关闭规则仅在临时会话有效时执行', async () => {
