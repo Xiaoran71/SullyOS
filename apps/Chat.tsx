@@ -273,7 +273,6 @@ const Chat: React.FC = () => {
         updateCharacter,
     ]);
     useEffect(() => { setTestShortcutAction(null); }, [activeCharacterId]);
-    useEffect(() => { setPreReplyMcpProposal(null); }, [activeCharacterId]);
 
     // ChatParser 只发出“已验证的动作 ID”；这里才把弹窗写入角色本地状态。
     // 这样刷新页面后锁定弹窗仍然存在，同时原版备份（没有这些可选字段）会自然保持无弹窗。
