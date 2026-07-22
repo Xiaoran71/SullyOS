@@ -64,6 +64,8 @@ export interface PreReplyMcpRunResult {
   context: string;
   ran: number;
   skipped: number;
+  /** 本轮实际注入了结果的规则名（含命中间隔缓存的规则）。 */
+  usedRuleNames: string[];
   errors: string[];
   abort: boolean;
 }
@@ -80,6 +82,7 @@ export async function runPreReplyMcpRules(
   const servers = loadMcpServers();
   const blocks: string[] = [];
   const errors: string[] = [];
+  const usedRuleNames: string[] = [];
   let ran = 0;
   let skipped = 0;
   let abort = false;
@@ -100,6 +103,7 @@ export async function runPreReplyMcpRules(
     const minIntervalMs = rule.minIntervalMinutes * 60_000;
     if (cached && minIntervalMs > 0 && now.getTime() - cached.at < minIntervalMs) {
       blocks.push(cached.block);
+      usedRuleNames.push(rule.name || rule.toolName);
       skipped++;
       continue;
     }
@@ -111,6 +115,7 @@ export async function runPreReplyMcpRules(
       if (!response.success) throw new Error(response.error || 'MCP 工具调用失败');
       const block = renderRuleBlock(rule, server, response.data ?? response.rawText ?? '', now);
       blocks.push(block);
+      usedRuleNames.push(rule.name || rule.toolName);
       cache.set(cacheKey, { at: now.getTime(), block });
       ran++;
     } catch (error: any) {
@@ -120,10 +125,9 @@ export async function runPreReplyMcpRules(
     }
   }
 
-  onStatus?.('');
   return {
     context: blocks.length ? `\n\n### 回复前自动 MCP 上下文\n${blocks.join('\n\n---\n\n')}` : '',
-    ran, skipped, errors, abort,
+    ran, skipped, usedRuleNames, errors, abort,
   };
 }
 

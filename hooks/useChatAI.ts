@@ -780,6 +780,13 @@ export const useChatAI = ({
                 if (preReplyMcp.abort) throw new Error(`回复前 MCP 读取失败，本轮已按规则中止：${detail}`);
                 addToast(`部分回复前数据读取失败，已继续回复：${detail}`, 'info');
             }
+            // 快服务器可能在 React 下一次绘制前就完成；保留“已读取”状态直到本轮 finally，
+            // 让用户明确知道自动规则确实运行了，同时不人为 sleep、不给回复增加延迟。
+            if (preReplyMcp.usedRuleNames.length) {
+                setSearchStatus(`已读取：${preReplyMcp.usedRuleNames.join('、')}`);
+            } else {
+                setSearchStatus('');
+            }
 
             // 1. 构造完整 chat 请求载荷（memoryPalace 召回 + system prompt + 双语 / HTML / 思考链 / MCD + 历史）
             //    — 主动消息和 emotion eval 走的是同一个 helper，保证三家拿到的"材料"完全一致。

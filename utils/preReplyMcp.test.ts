@@ -57,6 +57,7 @@ describe('preReplyMcp', () => {
     expect(result.context).toContain('"total": 2');
     expect(result.context).toContain('query_events');
     expect(result.ran).toBe(1);
+    expect(result.usedRuleNames).toEqual(['检查手机使用']);
   });
 
   it('最短间隔内复用内存缓存，不重复请求 MCP', async () => {
@@ -67,6 +68,7 @@ describe('preReplyMcp', () => {
     const second = await runPreReplyMcpRules(char([cachedRule]), undefined, new Date(2026, 6, 22, 12, 5));
     expect(callMcpTool).toHaveBeenCalledTimes(1);
     expect(second.context).toContain('第一次数据');
+    expect(second.usedRuleNames).toEqual(['检查手机使用']);
   });
 
   it('关键规则失败时标记中止，默认规则则软失败继续', async () => {
