@@ -850,7 +850,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-violet-300 border-violet-400/20' : 'bg-violet-50 text-violet-500 border-violet-100'}`}>
                                 <PlugsConnected className="w-6 h-6" weight="fill" />
                               </div>
-                              <span className="text-xs font-bold">自动 MCP</span>
+                              <span className="text-xs font-bold">强制 MCP</span>
                             </button>
                           </div>
 

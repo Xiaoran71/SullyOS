@@ -21,7 +21,6 @@ import { getLocalDateKey } from './localDate';
 import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
 import { buildShortcutActionsPrompt } from './shortcutActions';
-import { buildPreReplyMcpProposalPrompt } from './preReplyMcp';
 
 // 语音格式指导按当前 TTS 服务商二选一：用 MiniMax 才注入 MiniMax 那套（含 <#秒#> 停顿标记），
 // 用鱼声则注入鱼声版（去掉 MiniMax 专属标记，改用标点 / 省略号控制停顿）。
@@ -961,7 +960,6 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
         // 而不是靠「别像 XX」防守。同时给「闲聊可松弛、没人打分」的许可，卸掉「每句都要交高质量」
         // 的隐性考核压力——不必靠表演情绪深度来交差，滑回均值腔的诱因随之减弱。
         recencyTail += buildShortcutActionsPrompt(char);
-        recencyTail += buildPreReplyMcpProposalPrompt(char);
 
         recencyTail += `\n\n### 最后，回到你自己
 你就是 ${char.name}。

@@ -2665,9 +2665,17 @@ export interface ShortcutActionRuntime {
 export interface PreReplyMcpRule {
   id: string;
   name: string;
+  /**
+   * 工具对当前角色的唯一调用模式。缺失表示旧版自动 MCP 配置，读取时自动迁移。
+   * - on_demand: 完全沿用原版，由模型按需调用
+   * - always: 每次回复前强制调用
+   * - disabled: 不向模型暴露，也不自动调用
+   */
+  mode?: 'on_demand' | 'always' | 'disabled';
   /** 给角色看的自然语言用途与何时可提议临时开启。 */
   activationDescription?: string;
-  enabled: boolean;
+  /** @deprecated 旧版“永久启用”字段，仅用于备份迁移。 */
+  enabled?: boolean;
   serverId: string;
   toolName: string;
   /** MCP tools/call 的 arguments，使用 JSON 对象文本，便于完整支持任意 MCP。 */
@@ -2675,13 +2683,14 @@ export interface PreReplyMcpRule {
   /** 支持 {{result}} / {{server}} / {{tool}} / {{time}} 占位符。 */
   promptTemplate: string;
   maxResultChars: number;
+  /** @deprecated 强制模式现在每次回复都真实调用，不再复用间隔缓存。 */
   minIntervalMinutes: number;
-  /** 可选的每日生效区间（本地时间 HH:mm）；跨午夜区间同样支持。 */
+  /** @deprecated 强制模式现在不再限制每日生效时段。 */
   activeTimeStart?: string;
   activeTimeEnd?: string;
   /** 失败时继续回复（默认）或中止本轮，避免在关键数据缺失时乱答。 */
   onFailure: 'continue' | 'abort';
-  /** 默认 false：交给自动规则专用，不再同时暴露给模型的普通 MCP 工具调用。 */
+  /** @deprecated 旧版叠加权限字段，仅用于备份迁移。 */
   allowManualModelCall?: boolean;
 }
 

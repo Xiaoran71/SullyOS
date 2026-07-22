@@ -12,12 +12,6 @@ import {
     SHORTCUT_ACTION_EVENT,
     SHORTCUT_ACTION_TAG_RE,
 } from './shortcutActions';
-import {
-    isPreReplyMcpRuleEnabledForCharacter,
-    normalizePreReplyMcpRules,
-    PRE_REPLY_MCP_PROPOSAL_EVENT,
-    PRE_REPLY_MCP_PROPOSAL_TAG_RE,
-} from './preReplyMcp';
 
 export interface MusicActionSnapshot {
     songId: number;
@@ -176,33 +170,6 @@ export const ChatParser = {
             // 卡片自己的字段优先，inheritMeta 只补它没有的键（两边键名本来就不重叠，这里是防御）
             ...(inheritMeta ? { metadata: { ...inheritMeta, ...(msg.metadata || {}) } } : {}),
         });
-
-        // MCP_MONITOR — 角色只能提议临时启用用户已经配置好的规则；前端仍需用户确认。
-        // 模型无权更改服务器、工具或参数，持续时间也在这里做硬上限校验。
-        const monitorMatches = Array.from(content.matchAll(new RegExp(PRE_REPLY_MCP_PROPOSAL_TAG_RE.source, 'g')));
-        if (monitorMatches.length > 0) {
-            try {
-                const profile = (await DB.getAllCharacters()).find(c => c.id === charId);
-                if (profile) {
-                    for (const match of monitorMatches) {
-                        const ruleId = match[1];
-                        const durationMinutes = Math.min(10_080, Math.max(1, Number(match[2]) || 0));
-                        const rule = normalizePreReplyMcpRules(profile.preReplyMcpRules).find(item => item.id === ruleId);
-                        if (!rule || isPreReplyMcpRuleEnabledForCharacter(profile, rule)) continue;
-                        const message = String(match[3] || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
-                        if (typeof window !== 'undefined') {
-                            window.dispatchEvent(new CustomEvent(PRE_REPLY_MCP_PROPOSAL_EVENT, {
-                                detail: { charId, ruleId, durationMinutes, message: message || undefined },
-                            }));
-                        }
-                        break;
-                    }
-                }
-            } catch (error) {
-                console.warn('[PreReplyMcp] proposal parse failed:', error);
-            }
-            content = content.replace(new RegExp(PRE_REPLY_MCP_PROPOSAL_TAG_RE.source, 'g'), '').trim();
-        }
 
         // SHORTCUT_ACTION — 模型只能请求角色档案中已启用的动作 ID；URL 始终由前端配置提供。
         // 每条回复至多处理第一个合法请求，其余标签全部剥除，避免一轮弹多次。

@@ -8,19 +8,15 @@ vi.mock('./mcpClient', () => ({ callMcpTool, loadMcpServers }));
 
 import {
   clearPreReplyMcpCache,
-  buildPreReplyMcpProposalPrompt,
   getPreReplyMcpReservedTools,
-  isPreReplyMcpRuleActiveNow,
-  isPreReplyMcpRuleEnabledForCharacter,
   normalizePreReplyMcpRules,
   parsePreReplyMcpArguments,
   runPreReplyMcpRules,
-  PRE_REPLY_MCP_PROPOSAL_TAG_RE,
 } from './preReplyMcp';
 import type { CharacterProfile, PreReplyMcpRule } from '../types';
 
 const rule = (patch: Partial<PreReplyMcpRule> = {}): PreReplyMcpRule => ({
-  id: 'usage', name: '检查手机使用', enabled: true, serverId: 'server-1', toolName: 'query_events',
+  id: 'usage', name: '检查手机使用', mode: 'always', serverId: 'server-1', toolName: 'query_events',
   argumentsJson: '{"hours": 6}', promptTemplate: '设备数据：{{result}}（{{tool}}）',
   maxResultChars: 8000, minIntervalMinutes: 0, onFailure: 'continue', ...patch,
 });
@@ -47,54 +43,23 @@ describe('preReplyMcp', () => {
     expect(() => parsePreReplyMcpArguments('[1,2]')).toThrow(/JSON 对象/);
   });
 
-  it('支持普通与跨午夜的每日生效区间', () => {
-    expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '08:00', activeTimeEnd: '20:00' }), new Date(2026, 6, 22, 12))).toBe(true);
-    expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '22:00', activeTimeEnd: '06:00' }), new Date(2026, 6, 22, 23))).toBe(true);
-    expect(isPreReplyMcpRuleActiveNow(rule({ activeTimeStart: '22:00', activeTimeEnd: '06:00' }), new Date(2026, 6, 22, 12))).toBe(false);
-  });
-
-  it('临时会话只在确认后的有效期内启用关闭规则', () => {
-    const disabled = rule({ enabled: false });
-    const now = Date.parse('2026-07-22T12:00:00');
-    expect(isPreReplyMcpRuleEnabledForCharacter(char([disabled]), disabled, now)).toBe(false);
-    const active = { ...char([disabled]), temporaryPreReplyMcpSessions: [{ ruleId: disabled.id, startedAt: now - 1000, expiresAt: now + 1000 }] };
-    expect(isPreReplyMcpRuleEnabledForCharacter(active, disabled, now)).toBe(true);
-    expect(isPreReplyMcpRuleEnabledForCharacter(active, disabled, now + 2000)).toBe(false);
-  });
-
-  it('给角色的提议协议只公开关闭规则的 ID/用途，不公开参数或服务器', () => {
-    const prompt = buildPreReplyMcpProposalPrompt(char([
-      rule({ enabled: false, activationDescription: '监督手机使用' }),
-      rule({ id: 'always', enabled: true, argumentsJson: '{"secret":"x"}' }),
-    ]));
-    expect(prompt).toContain('ID=usage');
-    expect(prompt).toContain('监督手机使用');
-    expect(prompt).not.toContain('ID=always');
-    expect(prompt).not.toContain('secret');
-    const match = '[[MCP_MONITOR:usage|180|接下来我会看着你。]]'.match(PRE_REPLY_MCP_PROPOSAL_TAG_RE);
-    expect(match).not.toBeNull();
-  });
-
-  it('自动规则默认独占工具，只有明确允许时才继续暴露给模型', () => {
+  it('只有强制与禁用模式独占工具，按需模式保持原版暴露', () => {
     expect(getPreReplyMcpReservedTools(char([rule()]))).toEqual([{ serverId: 'server-1', toolName: 'query_events' }]);
-    expect(getPreReplyMcpReservedTools(char([rule({ allowManualModelCall: true })]))).toEqual([]);
+    expect(getPreReplyMcpReservedTools(char([rule({ mode: 'disabled' })]))).toEqual([{ serverId: 'server-1', toolName: 'query_events' }]);
+    expect(getPreReplyMcpReservedTools(char([rule({ mode: 'on_demand' })]))).toEqual([]);
+    expect(getPreReplyMcpReservedTools(char())).toEqual([]);
   });
 
-  it('关闭规则仅在临时会话有效时执行', async () => {
-    callMcpTool.mockResolvedValue({ success: true, data: '临时数据' });
-    const disabled = rule({ enabled: false });
+  it('按需与禁用模式都不会走回复前强制调用', async () => {
     const now = new Date(2026, 6, 22, 12);
-    await runPreReplyMcpRules(char([disabled]), undefined, now);
+    await runPreReplyMcpRules(char([rule({ mode: 'on_demand' }), rule({ id: 'off', mode: 'disabled' })]), undefined, now);
     expect(callMcpTool).not.toHaveBeenCalled();
-    const active = { ...char([disabled]), temporaryPreReplyMcpSessions: [{ ruleId: disabled.id, startedAt: now.getTime() - 1, expiresAt: now.getTime() + 60_000 }] };
-    const result = await runPreReplyMcpRules(active, undefined, now);
-    expect(callMcpTool).toHaveBeenCalledTimes(1);
-    expect(result.context).toContain('临时数据');
   });
 
   it('在回复前直接调用白名单工具并渲染本轮上下文', async () => {
     callMcpTool.mockResolvedValue({ success: true, data: { total: 2, apps: ['抖音', '微博'] } });
-    const result = await runPreReplyMcpRules(char([rule()]), undefined, new Date(2026, 6, 22, 12));
+    const now = new Date(2026, 6, 22, 12);
+    const result = await runPreReplyMcpRules(char([rule()]), undefined, now);
     expect(callMcpTool).toHaveBeenCalledWith(server, 'query_events', { hours: 6 });
     expect(result.context).toContain('回复前自动 MCP 上下文');
     expect(result.context).toContain('"total": 2');
@@ -103,21 +68,36 @@ describe('preReplyMcp', () => {
     expect(result.usedRuleNames).toEqual(['检查手机使用']);
   });
 
-  it('最短间隔内复用内存缓存，不重复请求 MCP', async () => {
-    callMcpTool.mockResolvedValue({ success: true, data: '第一次数据' });
-    const cachedRule = rule({ minIntervalMinutes: 30 });
+  it('强制模式每次回复都真实调用，不复用旧版间隔缓存', async () => {
+    callMcpTool.mockResolvedValue({ success: true, data: '最新数据' });
+    const forcedRule = rule({ minIntervalMinutes: 30 });
     const first = new Date(2026, 6, 22, 12, 0);
-    await runPreReplyMcpRules(char([cachedRule]), undefined, first);
-    const second = await runPreReplyMcpRules(char([cachedRule]), undefined, new Date(2026, 6, 22, 12, 5));
-    expect(callMcpTool).toHaveBeenCalledTimes(1);
-    expect(second.context).toContain('第一次数据');
+    await runPreReplyMcpRules(char([forcedRule]), undefined, first);
+    const second = await runPreReplyMcpRules(char([forcedRule]), undefined, new Date(2026, 6, 22, 12, 5));
+    expect(callMcpTool).toHaveBeenCalledTimes(2);
+    expect(second.context).toContain('最新数据');
     expect(second.usedRuleNames).toEqual(['检查手机使用']);
   });
 
   it('关键规则失败时标记中止，默认规则则软失败继续', async () => {
     callMcpTool.mockResolvedValue({ success: false, error: 'VPN 不通' });
-    const result = await runPreReplyMcpRules(char([rule({ onFailure: 'abort' })]));
+    const now = new Date();
+    const failedRule = rule({ onFailure: 'abort' });
+    const result = await runPreReplyMcpRules(char([failedRule]), undefined, now);
     expect(result.abort).toBe(true);
     expect(result.errors[0]).toContain('VPN 不通');
+  });
+
+  it('旧版双开关与短暂 monitor 配置会迁移为单一模式并移除旧字段', () => {
+    const migratedAuto = normalizePreReplyMcpRules([rule({ mode: undefined, enabled: true })])[0];
+    const migratedOff = normalizePreReplyMcpRules([rule({ mode: undefined, enabled: false })])[0];
+    const migratedManual = normalizePreReplyMcpRules([rule({ mode: undefined, allowManualModelCall: true })])[0];
+    const migratedMonitor = normalizePreReplyMcpRules([{ ...rule(), mode: 'monitor' } as any])[0];
+    expect(migratedAuto.mode).toBe('always');
+    expect(migratedOff.mode).toBe('disabled');
+    expect(migratedManual.mode).toBe('on_demand');
+    expect(migratedMonitor.mode).toBe('always');
+    expect(migratedAuto).not.toHaveProperty('enabled');
+    expect(migratedManual).not.toHaveProperty('allowManualModelCall');
   });
 });
