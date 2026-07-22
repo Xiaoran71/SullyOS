@@ -11,6 +11,7 @@ describe('stripSensitiveCardFields', () => {
       proactiveConfig: { enabled: true, intervalMinutes: 60, secondaryApi: { baseUrl: 'https://x', apiKey: 'sk-SECRET3', model: 'gpt' } },
       activeMsg2Config: { enabled: true, secondaryApi: { apiKey: 'sk-SECRET4' } },
       shortcutActions: [{ id: 'lock', shortcutUrl: 'shortcuts://run-shortcut?name=私人锁屏' }],
+      preReplyMcpRules: [{ id: 'usage', serverId: 'private-server', toolName: 'query_events' }],
     };
 
     const out = stripSensitiveCardFields(card);
@@ -24,6 +25,7 @@ describe('stripSensitiveCardFields', () => {
     expect(out).not.toHaveProperty('proactiveConfig');
     expect(out).not.toHaveProperty('activeMsg2Config');
     expect(out).not.toHaveProperty('shortcutActions');
+    expect(out).not.toHaveProperty('preReplyMcpRules');
   });
 
   it('剥离美化 / 语言 / 运行时状态，保留角色本身', () => {

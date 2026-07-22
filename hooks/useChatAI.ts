@@ -24,6 +24,7 @@ import { MCD_PROPOSE_TOOL, autoFixProposalCodesByName } from '../utils/mcdToolBr
 import { LUCKIN_PROPOSE_TOOL, autoFixProposalCodesByName as autoFixLuckinProposalCodesByName, fetchOpenAIToolsForLuckin, inferCardKind as inferLuckinCardKind } from '../utils/luckinToolBridge';
 import { callLuckinTool } from '../utils/luckinMcpClient';
 import { callMcpTool, getMcpUseNativeTools } from '../utils/mcpClient';
+import { runPreReplyMcpRules } from '../utils/preReplyMcp';
 import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, extractTextFakedMcpCalls, formatMcpToolResult, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls, type FakedMcpCall } from '../utils/mcpToolBridge';
 import { buildToolResultMessage, normalizeToolCallsForCompat } from '../utils/toolCallCompat';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
@@ -771,6 +772,15 @@ export const useChatAI = ({
                 console.log(`📊 [Context] Loaded ${fullHistory.length} msgs from DB (React state had ${currentMsgs.length}, mode=${contextRange?.mode}, maxStart=${contextRange?.maxRangeStartMessageId ?? 'none'}, effectiveStart=${contextRange?.effectiveStartMessageId ?? 'none'})`);
             }
 
+            // 0.95 对话前自动 MCP：由前端按用户白名单直接调用，不让模型决定工具或参数。
+            // 结果只注入本轮易变上下文，不伪造 user 消息、不落聊天 DB。
+            const preReplyMcp = await stageT('preReplyMcp', runPreReplyMcpRules(charForGen, setSearchStatus));
+            if (preReplyMcp.errors.length) {
+                const detail = preReplyMcp.errors.join('；');
+                if (preReplyMcp.abort) throw new Error(`回复前 MCP 读取失败，本轮已按规则中止：${detail}`);
+                addToast(`部分回复前数据读取失败，已继续回复：${detail}`, 'info');
+            }
+
             // 1. 构造完整 chat 请求载荷（memoryPalace 召回 + system prompt + 双语 / HTML / 思考链 / MCD + 历史）
             //    — 主动消息和 emotion eval 走的是同一个 helper，保证三家拿到的"材料"完全一致。
             const mcdMiniSnap = mcdMiniAppRef?.current;
@@ -786,6 +796,7 @@ export const useChatAI = ({
                 contextLimit: limit,
                 realtimeConfig,
                 innerState: skipEmotionInjection ? undefined : (evolvedNarrative || undefined),
+                preReplyMcpContext: preReplyMcp.context,
                 userListeningContext: (() => {
                     if (music.current && music.playing && music.lyric.length > 0) {
                         const idx = music.activeLyricIdx;

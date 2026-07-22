@@ -2340,6 +2340,8 @@ export interface CharacterProfile {
   pendingShortcutAction?: PendingShortcutAction;
   /** 冷却与每日次数，仅由前端维护，模型不可修改。 */
   shortcutActionRuntime?: Record<string, ShortcutActionRuntime>;
+  /** 用户主动触发普通私聊回复前，自动执行的只读/已授权 MCP 工具规则。 */
+  preReplyMcpRules?: PreReplyMcpRule[];
   worldview?: string;
   /** 角色分组：指向 CharacterGroup.id；空或指向已删分组 = 未分组。仅本地组织用，不随角色卡导出 */
   groupId?: string;
@@ -2656,6 +2658,25 @@ export interface ShortcutActionRuntime {
   lastTriggeredAt?: number;
   dateKey?: string;
   countToday?: number;
+}
+
+export interface PreReplyMcpRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  serverId: string;
+  toolName: string;
+  /** MCP tools/call 的 arguments，使用 JSON 对象文本，便于完整支持任意 MCP。 */
+  argumentsJson: string;
+  /** 支持 {{result}} / {{server}} / {{tool}} / {{time}} 占位符。 */
+  promptTemplate: string;
+  maxResultChars: number;
+  minIntervalMinutes: number;
+  /** 可选的每日生效区间（本地时间 HH:mm）；跨午夜区间同样支持。 */
+  activeTimeStart?: string;
+  activeTimeEnd?: string;
+  /** 失败时继续回复（默认）或中止本轮，避免在关键数据缺失时乱答。 */
+  onFailure: 'continue' | 'abort';
 }
 
 /**

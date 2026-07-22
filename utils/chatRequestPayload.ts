@@ -64,6 +64,8 @@ export interface BuildChatPayloadInput {
     realtimeConfig?: RealtimeConfig;
     /** 上一轮 emotion eval 产出的内心独白 */
     innerState?: string;
+    /** 用户主动触发回复前直接调用 MCP 得到的本轮临时上下文；不来自聊天消息。 */
+    preReplyMcpContext?: string;
 
     // user 共听上下文（非 React 调用方可传 musicSnapshot 让 helper 自动算）
     userListeningContext?: UserListeningContext | null;
@@ -360,6 +362,8 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // ── 10. recency 钢印归位 + 组装 fullMessages ─────────
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
+    // 对话前自动 MCP 是分钟级实时材料，放在易变尾段；recency 钢印仍保持绝对最后。
+    if (input.preReplyMcpContext?.trim()) volatileTail += input.preReplyMcpContext;
     volatileTail += parts.recencyTail;
 
     // 结构：[稳定 system] + [历史消息] + [易变状态 system] (+ 末尾 reminder)。
