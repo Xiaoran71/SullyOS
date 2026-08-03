@@ -44,7 +44,6 @@ import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal'
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
 import ShortcutActionsModal from '../components/chat/ShortcutActionsModal';
 import ShortcutActionOverlay from '../components/chat/ShortcutActionOverlay';
-import PreReplyMcpRulesModal from '../components/chat/PreReplyMcpRulesModal';
 import { SHORTCUT_ACTION_EVENT, buildShortcutActionUrl, normalizeShortcutActions, recordShortcutActionRuntime } from '../utils/shortcutActions';
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
@@ -172,7 +171,6 @@ const Chat: React.FC = () => {
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
     const [showShortcutActionsModal, setShowShortcutActionsModal] = useState(false);
-    const [showPreReplyMcpModal, setShowPreReplyMcpModal] = useState(false);
     const [testShortcutAction, setTestShortcutAction] = useState<{ rule: ShortcutActionRule; createdAt: number } | null>(null);
 
     // Archive Prompts State
@@ -1387,7 +1385,6 @@ const Chat: React.FC = () => {
             case 'chrome-sound': setModalType('chrome-sound'); break;
             case 'fine-tune': setShowPanel('none'); setFineTuneOpen(true); setFineTunePanelOpen(true); break;
             case 'shortcut-actions': setShowPanel('none'); setShowShortcutActionsModal(true); break;
-            case 'pre-reply-mcp': setShowPanel('none'); setShowPreReplyMcpModal(true); break;
             case 'emoji-import': setModalType('emoji-import'); break;
             case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji'); break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
@@ -3609,18 +3606,6 @@ const Chat: React.FC = () => {
                         addToast('快捷动作已保存', 'success');
                     }}
                     onTest={(rule) => setTestShortcutAction({ rule, createdAt: Date.now() })}
-                />
-            )}
-
-            {char && (
-                <PreReplyMcpRulesModal
-                    isOpen={showPreReplyMcpModal}
-                    rules={char.preReplyMcpRules}
-                    onClose={() => setShowPreReplyMcpModal(false)}
-                    onSave={(rules) => {
-                        updateCharacter(char.id, { preReplyMcpRules: rules });
-                        addToast('MCP 调用模式已保存', 'success');
-                    }}
                 />
             )}
 

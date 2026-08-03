@@ -21,8 +21,8 @@ import { buildMcdMiniAppContextBlock } from './mcdToolBridge';
 import type { McdMiniAppSnapshot } from './mcdToolBridge';
 import { buildLuckinMiniAppContextBlock, buildLuckinChatSystemBlock } from './luckinToolBridge';
 import type { LuckinMiniAppSnapshot, LuckinChatState } from './luckinToolBridge';
-import { buildMcpOpenAITools, buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
-import { getPreReplyMcpReservedTools } from './preReplyMcp';
+import { isMcpChatAvailable } from './mcpClient';
+import { buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
 import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChange } from '../context/MusicContext';
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
@@ -64,8 +64,6 @@ export interface BuildChatPayloadInput {
     realtimeConfig?: RealtimeConfig;
     /** 上一轮 emotion eval 产出的内心独白 */
     innerState?: string;
-    /** 用户主动触发回复前直接调用 MCP 得到的本轮临时上下文；不来自聊天消息。 */
-    preReplyMcpContext?: string;
 
     // user 共听上下文（非 React 调用方可传 musicSnapshot 让 helper 自动算）
     userListeningContext?: UserListeningContext | null;
@@ -351,10 +349,9 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // ── 9d. 通用 MCP 工具模式 (用户自配的远程 MCP 服务器, 见 docs/mcp-client.md) ──
     // 工具清单来自持久化的发现结果，变化很慢 → 稳定段。
-    const reservedMcpTools = getPreReplyMcpReservedTools(char);
-    const mcpChatActive = buildMcpOpenAITools(char.id, reservedMcpTools).tools.length > 0;
+    const mcpChatActive = isMcpChatAvailable(char.id);
     if (mcpChatActive) {
-        const block = buildMcpSystemBlock(userProfile?.name || '用户', char.id, reservedMcpTools);
+        const block = buildMcpSystemBlock(userProfile?.name || '用户', char.id);
         if (block) {
             systemPrompt += block;
         }
@@ -363,8 +360,6 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // ── 10. recency 钢印归位 + 组装 fullMessages ─────────
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
-    // 对话前自动 MCP 是分钟级实时材料，放在易变尾段；recency 钢印仍保持绝对最后。
-    if (input.preReplyMcpContext?.trim()) volatileTail += input.preReplyMcpContext;
     volatileTail += parts.recencyTail;
 
     // 结构：[稳定 system] + [历史消息] + [易变状态 system] (+ 末尾 reminder)。

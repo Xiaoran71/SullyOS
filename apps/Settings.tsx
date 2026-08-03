@@ -133,8 +133,8 @@ const flushMcpToolConfigSync = () => {
 
 /**
  * 通用 MCP 工具服务器管理卡片（对标麦当劳/瑞幸卡片的样式，但服务器是用户自配的列表）。
- * 配置存 localStorage（utils/mcpClient）。服务器开关只表示连接可用；具体工具仍由
- * 各角色的调用模式决定，未单独配置的工具保持原版 function-calling 行为。
+ * 配置存 localStorage（utils/mcpClient），启用且发现过工具的服务器会在聊天里
+ * 以 function-calling 注入，详见 docs/mcp-client.md。
  */
 const McpServersCard: React.FC<{
     addToast: (msg: string, type?: any) => void;
@@ -212,7 +212,7 @@ const McpServersCard: React.FC<{
                 <button onClick={addServer} className="text-[11px] font-bold text-violet-600 bg-violet-100 px-2.5 py-1 rounded-lg active:scale-95 transition-transform">+ 添加</button>
             </div>
             <p className="text-[10px] text-violet-700/70 leading-relaxed">
-                接入任意标准 MCP 服务器（Streamable HTTP）：填 URL → 测试连接 → 打开“服务器可用”。未在角色的“强制 MCP”里配置过的工具保持原版按需调用行为。
+                接入任意标准 MCP 服务器（Streamable HTTP）：填 URL → 测试连接 → 打开开关，角色就能在聊天里调用这些工具。
                 被浏览器 CORS 拦住时配「代理 URL」：本地跑 <code className="bg-violet-100/80 px-1 rounded">node scripts/mcp-proxy.mjs</code>，或把 <code className="bg-violet-100/80 px-1 rounded">worker/mcp-proxy</code> 部署到你自己的 Cloudflare 账号。配置只存本机，详见 docs/mcp-client.md。
             </p>
             <div className="flex items-center justify-between gap-3 bg-white/70 border border-violet-100 rounded-xl px-3 py-2.5">
@@ -242,19 +242,16 @@ const McpServersCard: React.FC<{
                                 {server.url || '未填 URL'}{server.tools?.length ? ` · ${server.tools.length} 个工具` : ' · 未获取工具'}{server.charIds?.length ? ` · 绑定 ${server.charIds.length} 个聊天` : ''}
                             </div>
                         </button>
-                        <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[9px] font-bold text-slate-400">
-                            服务器可用
-                            <span className="relative inline-flex">
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
                             <input type="checkbox" checked={server.enabled} onChange={e => {
                                 if (e.target.checked && !(server.tools?.length)) {
-                                    addToast('先点「测试连接」拿到工具清单，再设为服务器可用', 'error');
+                                    addToast('先点「测试连接」拿到工具清单再启用', 'error');
                                     trackEvent('启用未测通的 MCP 服务器被拦下');
                                     return;
                                 }
                                 update(server.id, { enabled: e.target.checked });
                             }} className="sr-only peer" />
                             <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
-                            </span>
                         </label>
                     </div>
                     {expandedId === server.id && (
@@ -2344,7 +2341,7 @@ const Settings: React.FC = () => {
                 const toolCount = on.reduce((n, s) => n + (s.tools?.length || 0), 0);
                 return (
                     <p className="text-[10px] text-slate-400 mt-2">
-                        已配置 {list.length} 个服务器 · {on.length} 个可用{toolCount ? ` · 共 ${toolCount} 个工具` : ''}
+                        已配置 {list.length} 个服务器 · {on.length} 个启用中{toolCount ? ` · 共 ${toolCount} 个工具` : ''}
                     </p>
                 );
             })()}

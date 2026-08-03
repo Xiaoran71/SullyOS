@@ -2340,9 +2340,9 @@ export interface CharacterProfile {
   pendingShortcutAction?: PendingShortcutAction;
   /** 冷却与每日次数，仅由前端维护，模型不可修改。 */
   shortcutActionRuntime?: Record<string, ShortcutActionRuntime>;
-  /** 用户主动触发普通私聊回复前，自动执行的只读/已授权 MCP 工具规则。 */
+  /** @deprecated 已移除的回复前 MCP 配置，仅为旧完整备份无损往返保留，不参与运行。 */
   preReplyMcpRules?: PreReplyMcpRule[];
-  /** 经用户确认后临时生效的规则，到期自动忽略；不改变规则的永久开关。 */
+  /** @deprecated 已移除的临时 MCP 会话，仅为旧完整备份无损往返保留，不参与运行。 */
   temporaryPreReplyMcpSessions?: TemporaryPreReplyMcpSession[];
   worldview?: string;
   /** 角色分组：指向 CharacterGroup.id；空或指向已删分组 = 未分组。仅本地组织用，不随角色卡导出 */
@@ -2662,6 +2662,7 @@ export interface ShortcutActionRuntime {
   countToday?: number;
 }
 
+/** @deprecated 回复前 MCP 已移除；此结构只用于旧完整备份兼容。 */
 export interface PreReplyMcpRule {
   id: string;
   name: string;
@@ -2694,6 +2695,7 @@ export interface PreReplyMcpRule {
   allowManualModelCall?: boolean;
 }
 
+/** @deprecated 回复前 MCP 已移除；此结构只用于旧完整备份兼容。 */
 export interface TemporaryPreReplyMcpSession {
   ruleId: string;
   startedAt: number;

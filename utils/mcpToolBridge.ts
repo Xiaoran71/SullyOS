@@ -32,10 +32,6 @@ export interface OpenAIMcpTool {
 
 /** 名映射条目，server 收窄成前台的完整配置类型（含 proxyUrl 等浏览器侧字段） */
 export type ResolvedMcpTool = McpResolvedToolCore<McpServerConfig>;
-export interface McpToolExclusion { serverId: string; toolName: string }
-
-const exclusionSet = (items: McpToolExclusion[] = []) =>
-    new Set(items.map(item => `${item.serverId}\0${item.toolName}`));
 
 /** 正文假调用条目，server 收窄成前台完整配置（callMcpTool 要 proxyUrl/proxyKey） */
 export type FakedMcpCall = FakedMcpCallCore<McpServerConfig>;
@@ -46,14 +42,9 @@ export type FakedMcpCall = FakedMcpCallCore<McpServerConfig>;
  * 保证前台聊天和 amsg worker 后台 fire 看到的是同一套工具名。
  * charId：只聚合对该角色可见的服务器（通用 + 绑定了该角色的）。
  */
-export const buildMcpOpenAITools = (charId?: string, excluded: McpToolExclusion[] = []): { tools: OpenAIMcpTool[]; resolve: Map<string, ResolvedMcpTool> } => {
+export const buildMcpOpenAITools = (charId?: string): { tools: OpenAIMcpTool[]; resolve: Map<string, ResolvedMcpTool> } => {
     const servers = getEnabledMcpServers(charId);
-    const excludedSet = exclusionSet(excluded);
-    const resolve: Map<string, ResolvedMcpTool> = new Map(
-        [...buildMcpNameMap(servers)].filter(([, { server, toolName }]) =>
-            !excludedSet.has(`${server.id}\0${toolName}`),
-        ),
-    );
+    const resolve: Map<string, ResolvedMcpTool> = buildMcpNameMap(servers);
     const tools: OpenAIMcpTool[] = [];
     for (const [exposed, { server, tool }] of resolve) {
         tools.push({
@@ -81,14 +72,13 @@ const buildToolDescription = (server: McpServerConfig, t: McpToolDef, multi: boo
  * 与瑞幸不同：这里的工具是用户自配的、内容未知，所以只讲纪律，不讲业务流程。
  * charId：只列对该角色可见的服务器，与 buildMcpOpenAITools 的过滤保持一致。
  */
-export const buildMcpSystemBlock = (userName: string = '用户', charId?: string, excluded: McpToolExclusion[] = []): string => {
+export const buildMcpSystemBlock = (userName: string = '用户', charId?: string): string => {
     const servers = getEnabledMcpServers(charId);
-    const excludedSet = exclusionSet(excluded);
+    if (!servers.length) return '';
     const lines = servers.map(s => {
-        const names = (s.tools || []).filter(t => !excludedSet.has(`${s.id}\0${t.name}`)).map(t => t.name).join('、');
+        const names = (s.tools || []).map(t => t.name).join('、');
         return `- ${s.name}: ${names}`;
-    }).filter(line => !line.endsWith(': '));
-    if (!lines.length) return '';
+    });
     return `
 
 ---

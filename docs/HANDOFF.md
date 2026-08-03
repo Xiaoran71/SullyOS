@@ -37,12 +37,7 @@
 
 1. `8d84925` — 可配置 iOS 快捷指令动作
 2. `5a9a3c8` — 聊天“＋”动作面板每页固定最多 8 个图标
-3. `5de4145` — 回复前自动调用可配置 MCP 工具
-4. `ee65398` — 保持“回复前读取”状态可见
-5. `29e4e68` — 曾加入临时 MCP 监控会话确认
-6. `c06bf55` — 强制/禁用工具不再同时暴露给模型普通调用
-7. `f28b3db` — MCP 模式简化为三种互斥模式
-8. `31b3300` — 删除导致聊天页崩溃的过期 proposal state 重置
+3. `5de4145` 至 `31b3300` — 回复前 MCP 的历史实现与修复；该功能已于 2026-08-03 按用户决定从当前代码移除，提交仅作为 Git 历史保留
 
 同步时的主要冲突点为 `apps/Chat.tsx`、`components/chat/ChatInputArea.tsx`、`utils/chatParser.ts`、`utils/chatPrompts.ts`、`apps/Settings.tsx` 和 `utils/mcpToolBridge.ts`；均已按上游当前架构适配。
 
@@ -97,10 +92,9 @@
 已完成：
 
 - 拉取并核对 `upstream/master@d521b8e`（其最新业务提交为 `27435cb`）；共同基线 `ac7f739` 之后，上游新增 1971 个提交、397 个文件发生变化。
-- 在新分支上保留上游完整历史，再移植 iOS 快捷动作和三模式 MCP；旧定制分支没有被重写。
-- 上游动作面板已新增第三页和「记忆链接」；快捷动作与强制 MCP 均放入第三页，继续满足每页最多 8 个网格入口。
-- 上游已将 MCP 工具命名/重名映射抽到 `utils/mcpFireCore.ts`；本 fork 的强制/禁用排除逻辑现在复用该映射，不再维护第二套工具命名算法。
-- 删除已不可达的 `PreReplyMcpProposalModal`，并停止在保存三模式配置时改写废弃的临时会话状态。
+- 在新分支上保留上游完整历史，再移植 iOS 快捷动作；旧定制分支没有被重写。回复前 MCP 曾被移植，后按用户决定完整移除运行能力。
+- 上游动作面板已新增第三页和「记忆链接」；快捷动作放入第三页，继续满足每页最多 8 个网格入口。
+- 上游已将 MCP 工具命名/重名映射抽到 `utils/mcpFireCore.ts`；当前私聊恢复直接使用上游原生 MCP 工具映射。
 
 上游重叠能力结论：
 
@@ -150,69 +144,17 @@
 
 - 动作面板“编辑排列”模式进入待办，暂不开发。
 
-## 6. 已完成定制：阶段 3 — 回复前 MCP
+## 6. 已移除定制：阶段 3 — 回复前 MCP
 
-### 当前三模式
+2026-08-03 用户决定删除 fork 后新增的“回复前 MCP / 强制 MCP”功能。当前状态：
 
-用户可在聊天页“强制 MCP”中，针对明确配置过的单个服务器工具选择：
+- 聊天动作面板不再显示“强制 MCP”，配置弹窗和实现文件已删除。
+- 私聊回复前不再自动调用 MCP，不再显示“回复前读取 / 已读取”，也不再向本轮 prompt 注入自动读取结果。
+- 不再按角色规则强制或禁用单个工具；私聊恢复 SullyOS 上游原生 MCP 语义：设置中已启用且对当前聊天可见的工具，由模型按需调用。
+- 通用 MCP 客户端、设置页服务器配置、群聊 MCP、主动消息 2.0 MCP 和各品牌 MCP 均未删除。
+- 未清理 IndexedDB 中旧角色对象上的 `preReplyMcpRules` / `temporaryPreReplyMcpSessions`，避免修改用户数据。对应可选类型和角色卡隐私剥离规则继续保留为惰性兼容层，使旧完整备份可无损往返且旧本机配置不会随分享角色卡外泄；这些字段不再参与任何运行逻辑。
 
-1. `角色按需调用`：完全保留 SullyOS 原版行为，模型可以自行调用，用户也可以在对话中要求调用。
-2. `每次回复强制调用`：用户触发角色回复后，前端先直接调用工具，把结果作为本轮易变上下文交给角色；同一工具不再同时暴露给模型，避免重复调用。
-3. `禁用`：既不自动调用，也不向模型暴露。
-
-没有进入“强制 MCP”配置的工具保持原版行为。
-
-### 为什么这样设计
-
-- MCP 服务器的总启用状态仍由“设置 → MCP 工具服务器”负责；“强制 MCP”只决定当前角色如何使用某个已启用工具。
-- 一个工具只有一个互斥模式，避免“设置里启用、自动 MCP 又有多个开关”的叠加语义。
-- 强制模式由前端使用固定参数直接调用，不让模型决定是否调用或修改参数，适合每轮读取手机使用数据等确定性任务。
-- 工具结果只进入本轮 prompt，不伪造成用户消息，也不写入聊天记录，避免污染共同聊天历史。
-- 强制/禁用工具从模型工具清单中保留（reserve）出来，避免“先自动调用一次，模型又普通调用一次”。
-- 每条规则可设置失败后继续回复或中止本轮，以覆盖“辅助数据可缺失”与“关键数据缺失不能回答”两类场景。
-- 配置不随角色卡分享，因为 MCP server ID、参数和用途属于本机隐私配置；完整系统备份仍应保留这些字段。
-
-### 当前数据流
-
-```text
-用户让角色回复
-→ useChatAI 从 DB 读取本轮聊天上下文
-→ runPreReplyMcpRules 执行 mode=always 的规则
-→ 状态栏显示“回复前读取 / 已读取”
-→ 结果按用户可编辑模板渲染
-→ 作为 volatile context 注入 buildChatRequestPayload
-→ 构造模型可见工具时排除 mode=always / disabled 的工具
-→ 调用聊天模型
-```
-
-### 用户验证状态
-
-- 初版自动读取曾成功调用 `device-event-logger`，返回 55 条事件，角色可以读取并影响回复。
-- “回复前读取”状态最初不可见，修正后用户确认可见。
-- 之后 MCP 服务曾出现 `Failed to fetch`；2026-07-23 用户确认根因是梯子节点故障，换回可用节点后连接恢复，并非已确认的 SullyOS CORS 缺陷。
-- 三模式简化后曾出现 `setPreReplyMcpProposal is not defined` 导致聊天页崩溃；当前提交 `31b3300` 已删除过期引用。
-- 2026-07-23 用户复测确认“每次回复强制调用”可以正常执行。
-- 用户把已配置的 `query_events` 切换为“禁用”后，界面不再显示强制 MCP 提示，但角色仍发生了一次普通 MCP 自主调用。角色自述它只能看到/调用 `list_events`，不能调用 `query_events`；这与“禁用规则只保留指定工具、同一服务器的其他未配置工具仍保持原版按需行为”的当前实现相符，但实际调用工具名和完整工具清单尚未通过日志核实。
-- 因此当前“禁用”对指定工具是否正确生效：初步看可能已生效；用户是否会把它理解为禁用整个 MCP 服务器、以及其他工具为何被模型自主调用：**待排查/待澄清产品语义**。
-
-### 重要文件
-
-- `utils/preReplyMcp.ts`：规则迁移、三模式语义、直接调用与 prompt 注入
-- `utils/preReplyMcp.test.ts`：模式迁移、调用和保留工具测试
-- `components/chat/PreReplyMcpRulesModal.tsx`：三模式配置、参数预览和测试调用
-- `hooks/useChatAI.ts`：回复前执行、状态展示、结果注入和模型工具过滤
-- `utils/chatRequestPayload.ts`：易变 MCP 上下文加入本轮请求
-- `utils/mcpToolBridge.ts`：构造模型工具时排除 reserved tools
-- `apps/Settings.tsx`：MCP 设置相关文字调整
-- `types.ts`：`PreReplyMcpRule` 等角色字段
-
-### 已处理的遗留与仍保留的兼容层
-
-三模式简化前曾实现“角色提议临时开启 MCP 监控会话”。2026-08-03 同步时已确认它与当前产品语义冲突：
-
-- 已删除不可达的 `components/chat/PreReplyMcpProposalModal.tsx`。
-- 已删除保存当前三模式配置时清空旧临时会话的运行时写操作。
-- `TemporaryPreReplyMcpSession`、`temporaryPreReplyMcpSessions` 及旧规则字段仍保留为纯兼容结构：旧完整备份导入后可无损再导出，而角色卡剥离列表仍防止它们外泄。它们不参与当前运行主链路。
+删除原因是用户不再需要该 fork 功能。实现选择为“停止读取，不主动清数据”，从而不影响聊天、Memory Palace、备份恢复或未来回看 Git 历史。
 
 ## 7. 数据、备份与角色卡兼容
 
@@ -220,9 +162,9 @@
 
 - 主数据库为 IndexedDB `AetherOS_Data`，当前 schema 版本 70。
 - 原始私聊消息存储在 `messages` 表，主要通过 `charId` 区分，没有独立 `conversationId`。
-- 新增的快捷动作和 MCP 规则使用可选角色字段；旧角色缺失字段时标准化为空配置，不应改变原版行为。
-- 完整系统备份往返测试覆盖快捷动作、运行时状态和 MCP 规则。
-- 可分享角色卡会双向剥离快捷动作、MCP 规则、临时会话和运行时状态，防止本机配置及隐私外泄。
+- 快捷动作使用可选角色字段；旧角色缺失字段时标准化为空配置，不应改变原版行为。
+- 完整系统备份往返测试覆盖快捷动作、运行时状态，以及已经停用的回复前 MCP 旧字段兼容往返。
+- 可分享角色卡会双向剥离快捷动作、已停用的 MCP 旧规则/临时会话和运行时状态，防止本机配置及隐私外泄。
 
 ### 现有备份资源逻辑
 
@@ -338,15 +280,7 @@ assets/（可选，尽量复用现有备份资源逻辑）
 ### 需要优先复测
 
 1. MCP 外部服务此前的 `Failed to fetch` 已由用户确认是梯子节点故障，当前连接恢复；若以后再次出现，应先核对代理节点，再排查证书、Mixed Content、CORS 和 MCP 代理配置。
-2. 三模式简化和崩溃修复后的真实端到端行为仍需补齐：
-   - 未配置工具保持原版调用
-   - `角色按需调用`
-   - `每次回复强制调用`已确认能执行；仍需通过日志确认同一工具不会再普通调用一次
-   - `禁用`后通过日志确认指定工具确实从模型工具清单移除
-   - 确认本次普通自主调用的实际工具是否为未配置的 `list_events`，以及它为何满足模型的调用条件
-   - 决定 UI 中“禁用”的产品语义究竟是“只禁用当前工具”还是“禁用整个 MCP 服务器”；当前代码语义是前者
-   - 失败时继续/中止
-3. iOS Safari/PWA 与快捷指令在长期使用、页面恢复和阻塞弹窗持久化方面的完整回归范围：未知。
+2. iOS Safari/PWA 与快捷指令在长期使用、页面恢复和阻塞弹窗持久化方面的完整回归范围：未知。
 
 ### 功能待办
 
@@ -357,7 +291,7 @@ assets/（可选，尽量复用现有备份资源逻辑）
 
 ### 维护风险
 
-- 当前同步分支相对 `upstream/master@d521b8e` 修改 22 个文件，约新增 1506 行、删除 21 行（包含 `AGENTS.md` 和本交接文档）。
+- 当前工作树相对 `upstream/master@d521b8e` 修改 15 个文件，约新增 968 行、删除 3 行（Git 会把已删除的 fork 新文件视为相对上游“不存在”，因此不计入删除行数；包含 `AGENTS.md` 和本交接文档）。
 - `apps/Chat.tsx`、`hooks/useChatAI.ts`、`types.ts`、`utils/chatRequestPayload.ts` 是上游也可能频繁改动的热点，未来合并上游容易冲突。
 - `progress.md` 记录的是上游/其他历史开发任务，不是本 fork 的当前路线，不能作为本项目状态的唯一来源。
 - 上游当前锁定的 `@rei-standard/amsg-client@2.9.0-next.7`、`amsg-server@2.6.0-next.12`、`amsg-sw@2.4.0-next.3` 在 2026-08-03 仍处于 Codex 供应链最小发布年龄阻断期；不应为了消除警告放宽安全策略。
@@ -373,13 +307,10 @@ assets/（可选，尽量复用现有备份资源逻辑）
 - `components/chat/ChatInputArea.tsx`
 - `components/chat/ShortcutActionOverlay.tsx`
 - `components/chat/ShortcutActionsModal.tsx`
-- `components/chat/PreReplyMcpRulesModal.tsx`
 - `hooks/useChatAI.ts`
 - `types.ts`
 - `utils/shortcutActions.ts`
 - `utils/shortcutActions.test.ts`
-- `utils/preReplyMcp.ts`
-- `utils/preReplyMcp.test.ts`
 - `utils/chatParser.ts`
 - `utils/chatPrompts.ts`
 - `utils/chatRequestPayload.ts`
@@ -405,7 +336,7 @@ assets/（可选，尽量复用现有备份资源逻辑）
 
 ## 13. 验证基线
 
-2026-08-03 在 `codex/sync-upstream-20260803` 执行：
+2026-08-03 移除回复前 MCP 后，在 `codex/sync-upstream-20260803` 执行：
 
 ```bash
 node node_modules/vitest/vitest.mjs run
@@ -415,9 +346,9 @@ node node_modules/vite/bin/vite.js build
 
 结果：
 
-- Vitest：182 个测试文件通过，2363 个测试通过。
+- 针对性回归：`mcpClient`、`characterCard`、`backupRoundtrip` 共 49 个测试通过；覆盖上游原生 MCP、角色卡隐私剥离和旧字段完整备份往返。
+- Vitest：181 个测试文件通过，2354 个测试通过；减少的 1 个文件、9 个测试均为已删除功能的 `preReplyMcp` 专项测试。
 - 生产构建：通过；Worker bundles 与 Vite 构建均完成。
-- 针对性回归：`shortcutActions`、`preReplyMcp`、`mcpClient`、`characterCard`、`backupRoundtrip` 共 62 个测试通过。
 - 测试输出包含上游用例刻意触发的错误/降级日志（Worker 状态损坏、网络失败、天气源回退等），没有测试失败。
 - 构建后的主要 bundle 较大，但本轮未进行包体优化。
 - `pnpm install` 本身未通过 Codex 供应链政策检查，原因是上述 3 个上游预发布包太新，不是 lockfile 不一致或代码测试失败。本轮使用已按 lockfile 下载的本地可执行文件完成测试与构建。
@@ -430,7 +361,7 @@ node node_modules/vite/bin/vite.js build
 
 1. 在打开新分支对应版本前，先导出一份最新完整备份，记录日期和保存位置；不用旧备份覆盖当前数据。
 2. 本地启动后先检查原始私聊、Memory Palace、角色卡、相册/媒体和设置页，再导出一份新版完整备份做往返验证。
-3. 在无副作用的 MCP 服务器上逐一真机验证未配置、角色按需、每次强制、禁用和失败继续/中止；日志应确认同一工具不会重复调用。
+3. 在无副作用的 MCP 服务器上复测上游原生的私聊按需调用，确认移除回复前逻辑后工具仍可正常使用且不会自动预读。
 4. 在 iOS Safari/PWA 验证快捷动作配置、测试弹窗、真实 `shortcuts://` 跳转、阻塞弹窗刷新恢复和应急解锁。
 5. 按上游文档部署并验证主动消息 2.0；这取代旧的阶段 4 开发计划，但 Cloudflare Worker、D1、Push 订阅与手机锁屏投递仍必须人工验证。
 6. 上述验证通过后，再实施「Memory Palace 子批次全成功才推进高水位 + 记忆提取备用 LLM API」；这仍是同步后最有价值的 fork 专项。
