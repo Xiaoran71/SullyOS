@@ -1,9 +1,9 @@
 # SullyOS Fork 长期维护交接
 
-> 最后更新：2026-07-23（Asia/Shanghai）
+> 最后更新：2026-08-03（Asia/Shanghai）
 > 维护对象：`Xiaoran71/SullyOS` 个人 fork
-> 当前分支：`custom/stage-3-mcp-preflight`
-> 阶段 3 业务代码基线：`31b3300 fix(chat): remove stale MCP proposal reset`
+> 当前分支：`codex/sync-upstream-20260803`
+> 上游同步基线：`d521b8e Merge pull request #484 from qegj567-cloud/fix/amsg2-push-subscription-selfheal`
 
 本文档是本 fork 的长期交接入口，记录已经验证的状态、设计原因、风险和后续方向。它不替代各功能的专项文档。无法从仓库、Git 历史或用户实测确认的信息统一标记为“未知”。
 
@@ -30,9 +30,8 @@
 
 ### 分支
 
-- `master` / `custom/stage-1-ui`：位于基线提交 `ac7f739`
-- `custom/stage-2-shortcut-actions`：位于 `5a9a3c8`
-- `custom/stage-3-mcp-preflight`：当前工作分支；阶段 3 业务代码基线为 `31b3300`，其后可包含文档或维护提交
+- `custom/stage-3-mcp-preflight`：同步前的完整可回退基线，保留不动；业务代码终点为 `31b3300`，文档终点为 `ed2f2ec`。
+- `codex/sync-upstream-20260803`：当前工作分支；从 `upstream/master@d521b8e` 新建，逐提交移植阶段 2/3 定制，避免在 1971 个上游提交上直接 merge 老分支。
 
 当前定制提交序列：
 
@@ -45,7 +44,7 @@
 7. `f28b3db` — MCP 模式简化为三种互斥模式
 8. `31b3300` — 删除导致聊天页崩溃的过期 proposal state 重置
 
-当前工作区在生成本文档前为干净状态。本文档是本轮唯一预期改动。
+同步时的主要冲突点为 `apps/Chat.tsx`、`components/chat/ChatInputArea.tsx`、`utils/chatParser.ts`、`utils/chatPrompts.ts`、`apps/Settings.tsx` 和 `utils/mcpToolBridge.ts`；均已按上游当前架构适配。
 
 ## 3. 仓库结构速览
 
@@ -92,6 +91,23 @@
 原计划是在 `constants.tsx` 的 `INSTALLED_APPS` 中隐藏不需要的 App，不删除代码。用户后来明确决定跳过，当前没有该阶段的定制提交。
 
 设计原因：隐藏 App 的收益当时不高，优先把精力放到快捷指令和 MCP 联动，同时避免无必要地偏离上游。
+
+### 4.3 2026-08-03 上游大版本同步
+
+已完成：
+
+- 拉取并核对 `upstream/master@d521b8e`（其最新业务提交为 `27435cb`）；共同基线 `ac7f739` 之后，上游新增 1971 个提交、397 个文件发生变化。
+- 在新分支上保留上游完整历史，再移植 iOS 快捷动作和三模式 MCP；旧定制分支没有被重写。
+- 上游动作面板已新增第三页和「记忆链接」；快捷动作与强制 MCP 均放入第三页，继续满足每页最多 8 个网格入口。
+- 上游已将 MCP 工具命名/重名映射抽到 `utils/mcpFireCore.ts`；本 fork 的强制/禁用排除逻辑现在复用该映射，不再维护第二套工具命名算法。
+- 删除已不可达的 `PreReplyMcpProposalModal`，并停止在保存三模式配置时改写废弃的临时会话状态。
+
+上游重叠能力结论：
+
+- 「阶段 4 主动消息/Web Push/Cloudflare Cron」不应再按旧计划自建；上游已提供主动消息 2.0、后台 Worker、多任务、防穿帮闸、MCP 和推送诊断。后续只做个人部署与真机验证。
+- 上游已增加 Memory Palace 高水位 IndexedDB 镜像自愈、记忆修补入口和大备份稳定性修复；这些不再需要 fork 重复实现。
+- 「记忆提取备用 LLM API」仍未由上游覆盖。当前仍只有一个 `lightLLM`，且 250 条子批次中部分失败、部分成功时，仍可能把高水位推到整段末尾；旧设计仍有价值。
+- 「长期私聊归档 ZIP（Markdown + JSONL + manifest + 验证后清理）」仍未由上游覆盖。上游的自动话题/记忆归档与完整系统备份都不等于可恢复的单角色聊天归档。
 
 ## 5. 已完成定制：阶段 2 — iOS 快捷指令动作
 
@@ -190,22 +206,19 @@
 - `apps/Settings.tsx`：MCP 设置相关文字调整
 - `types.ts`：`PreReplyMcpRule` 等角色字段
 
-### 遗留代码候选（不要未经验证直接删除）
+### 已处理的遗留与仍保留的兼容层
 
-三模式简化前曾实现“角色提议临时开启 MCP 监控会话”。当前引用检查显示：
+三模式简化前曾实现“角色提议临时开启 MCP 监控会话”。2026-08-03 同步时已确认它与当前产品语义冲突：
 
-- `components/chat/PreReplyMcpProposalModal.tsx` 当前没有被其他源码导入，可能已不可达。
-- `TemporaryPreReplyMcpSession` 和 `temporaryPreReplyMcpSessions` 仍存在于类型、备份测试和角色卡剥离列表。
-- `activationDescription`、`minIntervalMinutes`、`activeTimeStart`、`activeTimeEnd` 有部分兼容/弃用痕迹；当前强制执行主链路不使用时间窗口或间隔缓存。
-- 保存强制 MCP 配置时仍会将 `temporaryPreReplyMcpSessions` 清空。
-
-这些内容目前不影响构建。是否删除、保留作备份兼容，或未来恢复“临时监控”能力：未知。处理前必须先确定产品方向并补迁移测试。
+- 已删除不可达的 `components/chat/PreReplyMcpProposalModal.tsx`。
+- 已删除保存当前三模式配置时清空旧临时会话的运行时写操作。
+- `TemporaryPreReplyMcpSession`、`temporaryPreReplyMcpSessions` 及旧规则字段仍保留为纯兼容结构：旧完整备份导入后可无损再导出，而角色卡剥离列表仍防止它们外泄。它们不参与当前运行主链路。
 
 ## 7. 数据、备份与角色卡兼容
 
 ### 已确认
 
-- 主数据库为 IndexedDB `AetherOS_Data`，当前 schema 版本 68。
+- 主数据库为 IndexedDB `AetherOS_Data`，当前 schema 版本 70。
 - 原始私聊消息存储在 `messages` 表，主要通过 `charId` 区分，没有独立 `conversationId`。
 - 新增的快捷动作和 MCP 规则使用可选角色字段；旧角色缺失字段时标准化为空配置，不应改变原版行为。
 - 完整系统备份往返测试覆盖快捷动作、运行时状态和 MCP 规则。
@@ -231,7 +244,7 @@
 - 最近 200 条语义消息为热区；高水位之后、热区之前累计至少 100 条才自动处理；每次处理缓冲区前 85%。
 - 大范围处理按每 250 条拆成 LLM 子批次。
 - 记忆提取 LLM 当前有瞬时错误重试；Embedding 也有有限重试和部分 400 降级。
-- 核心保存成功后更新 localStorage 高水位 `mp_lastMsgId_{charId}`；原始聊天不会因为进入 Memory Palace 而被物理删除。
+- 核心保存成功后更新 localStorage 高水位 `mp_lastMsgId_{charId}`，并写入 IndexedDB 镜像以便不稳定浏览器中自愈；原始聊天不会因为进入 Memory Palace 而被物理删除。
 
 ### 已确认风险
 
@@ -338,29 +351,29 @@ assets/（可选，尽量复用现有备份资源逻辑）
 ### 功能待办
 
 - 聊天“＋”动作面板编辑排列。
-- Memory Palace 记忆提取备用 LLM API。
+- Memory Palace 记忆提取备用 LLM API，并同时修复“部分子批次失败却跨过失败区间推进高水位”。
 - 长期聊天归档提醒、双格式导出、保存后验证、清理和恢复。
-- 阶段 4 主动消息/Web Push/Cloudflare Cron；目前未进入实施。
+- 主动消息 2.0 只需做个人 Cloudflare/Push 配置和真机验证；不再开发 fork 自有的第二套 Web Push/Cron。
 
 ### 维护风险
 
-- 当前定制分支相对基线修改 21 个文件，约新增 1026 行、删除 23 行。
+- 当前同步分支相对 `upstream/master@d521b8e` 修改 22 个文件，约新增 1506 行、删除 21 行（包含 `AGENTS.md` 和本交接文档）。
 - `apps/Chat.tsx`、`hooks/useChatAI.ts`、`types.ts`、`utils/chatRequestPayload.ts` 是上游也可能频繁改动的热点，未来合并上游容易冲突。
 - `progress.md` 记录的是上游/其他历史开发任务，不是本 fork 的当前路线，不能作为本项目状态的唯一来源。
-- `components/chat/PreReplyMcpProposalModal.tsx` 等遗留候选会增加理解成本，但当前不应在没有产品决定和测试的情况下清理。
+- 上游当前锁定的 `@rei-standard/amsg-client@2.9.0-next.7`、`amsg-server@2.6.0-next.12`、`amsg-sw@2.4.0-next.3` 在 2026-08-03 仍处于 Codex 供应链最小发布年龄阻断期；不应为了消除警告放宽安全策略。
 - 本地浏览器 IndexedDB 可能因清缓存、浏览器站点数据清理或设备故障丢失；完整备份仍是第一道保护，聊天归档不能替代完整系统备份。
 
 ## 12. 重要文件清单
 
 ### 本 fork 已修改
 
+- `AGENTS.md`
 - `apps/Chat.tsx`
 - `apps/Settings.tsx`
 - `components/chat/ChatInputArea.tsx`
 - `components/chat/ShortcutActionOverlay.tsx`
 - `components/chat/ShortcutActionsModal.tsx`
 - `components/chat/PreReplyMcpRulesModal.tsx`
-- `components/chat/PreReplyMcpProposalModal.tsx`（遗留候选）
 - `hooks/useChatAI.ts`
 - `types.ts`
 - `utils/shortcutActions.ts`
@@ -375,6 +388,7 @@ assets/（可选，尽量复用现有备份资源逻辑）
 - `utils/characterCard.ts`
 - `utils/characterCard.test.ts`
 - `utils/backupRoundtrip.test.ts`
+- `docs/HANDOFF.md`
 
 ### 后续归档工作预计先阅读
 
@@ -391,32 +405,33 @@ assets/（可选，尽量复用现有备份资源逻辑）
 
 ## 13. 验证基线
 
-2026-07-23 在当前提交执行：
+2026-08-03 在 `codex/sync-upstream-20260803` 执行：
 
 ```bash
-pnpm test:run
-pnpm build
+node node_modules/vitest/vitest.mjs run
+node scripts/build-workers.mjs
+node node_modules/vite/bin/vite.js build
 ```
 
 结果：
 
-- Vitest：103 个测试文件通过，1122 个测试通过。
+- Vitest：182 个测试文件通过，2363 个测试通过。
 - 生产构建：通过；Worker bundles 与 Vite 构建均完成。
-- 测试输出包含若干预期的错误/降级日志（Embedding 400 降级、天气源回退等），没有测试失败。
+- 针对性回归：`shortcutActions`、`preReplyMcp`、`mcpClient`、`characterCard`、`backupRoundtrip` 共 62 个测试通过。
+- 测试输出包含上游用例刻意触发的错误/降级日志（Worker 状态损坏、网络失败、天气源回退等），没有测试失败。
 - 构建后的主要 bundle 较大，但本轮未进行包体优化。
+- `pnpm install` 本身未通过 Codex 供应链政策检查，原因是上述 3 个上游预发布包太新，不是 lockfile 不一致或代码测试失败。本轮使用已按 lockfile 下载的本地可执行文件完成测试与构建。
 
 测试通过不代表外部 MCP、真实 iOS 快捷指令、VPN/CORS 和用户数据恢复已经端到端通过；这些必须单独人工验证。
 
 ## 14. 推荐的下一步
 
-当前最适合的下一步不是立刻开发新功能，而是完成一次小范围的“阶段 3 收口验证”：
+当前优先级是先将「同步成功」变成「用户数据和真实设备链路也验证成功」：
 
-1. MCP 服务连接现已恢复；保留当前可用节点，避免把代理故障误判为代码回归。
-2. 打开 MCP/API 调用日志，用同一个无敏感副作用的测试服务器逐一验证三种模式与未配置原版模式，特别记录每次实际调用的 `serverId`、`toolName` 和来源（强制调用或模型普通调用）。
-3. 复现“禁用 query_events 后仍普通调用”的场景，确认实际被调用的是 `query_events` 还是同服务器未配置的 `list_events`。若为后者，先决定产品希望禁用单工具还是整个服务器，再修改代码，避免把当前按工具白名单设计误修成另一种语义。
-4. 导出一次最新完整备份，并记录文件日期和恢复验证结果。
-5. 验证通过后为当前阶段打一个明确的里程碑 tag 或分支，例如 `milestone/stage-3-verified`（名称尚未由用户确认）。
-6. 再开始“记忆提取备用 LLM API”；其改动范围比聊天归档小，并能先降低 Memory Palace 因 API 不稳定而失败的概率。
-7. 备用 API 稳定后，再进入长期聊天归档的只读导出版本；第一版只生成和验证归档，不实现删除。
-
-这样安排的原因是：当前功能已经能构建并通过测试，但真实 MCP 网络链路仍有未闭环状态。先冻结一个人工验证过的基线，可以避免在归档、备份和 Memory Palace 同时变化时难以定位回归。
+1. 在打开新分支对应版本前，先导出一份最新完整备份，记录日期和保存位置；不用旧备份覆盖当前数据。
+2. 本地启动后先检查原始私聊、Memory Palace、角色卡、相册/媒体和设置页，再导出一份新版完整备份做往返验证。
+3. 在无副作用的 MCP 服务器上逐一真机验证未配置、角色按需、每次强制、禁用和失败继续/中止；日志应确认同一工具不会重复调用。
+4. 在 iOS Safari/PWA 验证快捷动作配置、测试弹窗、真实 `shortcuts://` 跳转、阻塞弹窗刷新恢复和应急解锁。
+5. 按上游文档部署并验证主动消息 2.0；这取代旧的阶段 4 开发计划，但 Cloudflare Worker、D1、Push 订阅与手机锁屏投递仍必须人工验证。
+6. 上述验证通过后，再实施「Memory Palace 子批次全成功才推进高水位 + 记忆提取备用 LLM API」；这仍是同步后最有价值的 fork 专项。
+7. 最后进入长期聊天归档的只读导出与验证版本；在测试角色完成往返恢复前，不实现真实聊天删除。

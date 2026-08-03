@@ -3618,10 +3618,7 @@ const Chat: React.FC = () => {
                     rules={char.preReplyMcpRules}
                     onClose={() => setShowPreReplyMcpModal(false)}
                     onSave={(rules) => {
-                        updateCharacter(char.id, {
-                            preReplyMcpRules: rules,
-                            temporaryPreReplyMcpSessions: [],
-                        });
+                        updateCharacter(char.id, { preReplyMcpRules: rules });
                         addToast('MCP 调用模式已保存', 'success');
                     }}
                 />
