@@ -3,7 +3,7 @@
 > 最后更新：2026-08-10（Asia/Shanghai）
 > 维护对象：`Xiaoran71/SullyOS` 个人 fork
 > 干净上游基线：`ce7f1128`（`qegj567-cloud/SullyOS:master`）
-> 迁移分支：`codex/shortcut-clean-baseline-20260810`
+> 发布分支：`master`（由 `codex/shortcut-clean-baseline-20260810` 验证后切换）
 
 ## 1. 当前目标
 
@@ -23,9 +23,9 @@
 - `master`：可部署的 custom release，应该始终是“官方历史 + 少量 fork 提交”。
 - `upstream-mirror`：自动化维护的纯官方镜像，禁止放个人提交。
 - `automation/sync-upstream`：自动同步使用的临时 PR 分支，可以被 workflow 更新。
-- `codex/shortcut-clean-baseline-20260810`：从官方 `ce7f1128` 建立的新干净候选基线。
+- `codex/shortcut-clean-baseline-20260810`：从官方 `ce7f1128` 建立并验证的干净基线来源分支。
 
-旧 `master@877e4e3c` 和历史 `custom/*` / `codex/sync-upstream-20260803` 分支均保留，可用于回退或审计，不应删除。
+旧 `master@877e4e3c` 另存为 `backup/master-before-clean-baseline-20260810`；历史 `custom/*` / `codex/sync-upstream-20260803` 分支也保留，可用于回退或审计，不应删除。
 
 ## 3. 干净基线包含的 fork 提交
 
@@ -122,6 +122,7 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 
 ## 9. 当前未完成事项
 
-- 新候选基线尚未替换远端 `master`，必须先完成最终差异审计和安全切换。
-- 切换 `master` 后需要用户做上述 iOS/PWA 与数据人工验收。
+- 用户已于 2026-08-10 确认切换前的最新完整系统备份已完成。
+- 干净基线完成自动测试、生产构建和最终差异审计后切换为远端 `master`；旧 `master` 先保存到永久备份分支。
+- 新版部署完成后仍需要用户做上述 iOS/PWA 与数据人工验收。
 - Memory Palace 备用 API、长期聊天归档、动作面板编辑排列等旧提案均处于暂停状态，不是当前维护计划。
