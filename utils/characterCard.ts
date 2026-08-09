@@ -23,6 +23,9 @@ export const CARD_STRIPPED_FIELDS = [
   'proactiveConfig',
   'activeMsg2Config',
   'shortcutActions',         // iOS 快捷指令名称/链接属于设备本地自动化配置
+  // 已移除功能的旧备份可能仍带这些字段；不参与运行，但分享角色卡时仍须剥离。
+  'preReplyMcpRules',
+  'temporaryPreReplyMcpSessions',
 
   // 2) 美化
   'embeddedTheme',           // CharacterExportData 上的内嵌主题（导入侧一并剥离）
