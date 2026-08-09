@@ -111,6 +111,8 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - 全量 Vitest：212 个测试文件、3038 项测试全部通过。
 - Worker bundles 与 Vite 生产构建通过。
 - workflow YAML 可解析，`git diff --check` 通过。
+- 旧 `master@877e4e3c` 已保存为远端 `backup/master-before-clean-baseline-20260810`；干净基线已安全切换为 `master`。
+- GitHub Actions 对切换提交 `9edb2332` 的 Pages 部署与 Worker bundle 同步均成功。
 - 当前官方 lockfile 中 `@rei-standard/amsg-server@2.6.0-next.16` 尚在 Codex 最小发布时间保护窗口内，标准 `pnpm install --frozen-lockfile` 因供应链策略返回非零；未放宽策略、未改 lockfile。本轮使用已下载的 lockfile 包在临时 worktree 补齐符号链接后完成测试和构建。
 
 自动测试不能替代以下人工验证：
@@ -123,6 +125,5 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 ## 9. 当前未完成事项
 
 - 用户已于 2026-08-10 确认切换前的最新完整系统备份已完成。
-- 干净基线完成自动测试、生产构建和最终差异审计后切换为远端 `master`；旧 `master` 先保存到永久备份分支。
 - 新版部署完成后仍需要用户做上述 iOS/PWA 与数据人工验收。
 - Memory Palace 备用 API、长期聊天归档、动作面板编辑排列等旧提案均处于暂停状态，不是当前维护计划。
