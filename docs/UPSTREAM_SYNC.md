@@ -16,7 +16,7 @@ The `Sync upstream SullyOS` workflow runs weekly and can also be started manuall
 2. Refresh `upstream-mirror` from the official commit.
 3. Attempt a normal Git merge into a branch created from this fork's `master`.
 4. Stop and open/update an issue if Git reports conflicts. The workflow aborts the merge and does not push partially resolved files.
-5. If the merge is clean, install the locked dependencies and run `pnpm run build`.
+5. If the merge is clean, install the locked dependencies, run shortcut/data-compatibility tests, and run `pnpm run build`.
 6. Only after a successful build, push `automation/sync-upstream` and open or update a pull request into `master`.
 
 Merging the pull request is intentionally the final safety gate. Enable GitHub auto-merge for that PR if fully unattended clean updates are desired; branch protection can require the build checks before GitHub completes it.
@@ -44,6 +44,7 @@ git pull --ff-only origin master
 git branch backup/custom-before-upstream-sync
 git merge --no-ff upstream/master
 pnpm install --frozen-lockfile
+pnpm exec vitest run utils/shortcutActions.test.ts utils/characterCard.test.ts utils/backupRoundtrip.test.ts
 pnpm run build
 ```
 
