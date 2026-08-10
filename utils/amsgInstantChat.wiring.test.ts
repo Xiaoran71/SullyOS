@@ -291,6 +291,11 @@ describe('Chat 界面的语音自动合成', () => {
 });
 
 describe('设置页那一道门', () => {
+  it('地址和密钥的延迟保存不携带即时对话旧值，避免覆盖刚拨开的开关', () => {
+    const persist = sliceSrc(settingsSrc, '全局配置延迟保存', 'const persistGlobalConfig', '\n  useEffect(() => {');
+    expect(persist).not.toContain('instantChatEnabled: config.instantChatEnabled');
+  });
+
   it('版本门槛只有这一处：探 /config-check 的 instantChat 标志', () => {
     expect(settingsSrc).toContain('probeInstantChatSupport');
     // 逐调用预检会让每发一条消息多一次网络往返，而且探失败时分不清是旧版还是网抖。
@@ -320,13 +325,15 @@ describe('设置页那一道门', () => {
     expect(report).toContain('instantChatGateReported');
   });
 
-  it('开关落盘：两个 saveGlobalConfig 调用点都要带上它', () => {
-    // 漏一处的话，用户改完 Worker 地址（或点一次「连接」）开关就被冲回默认值。
-    const saves = settingsSrc.match(/ActiveMsgStore\.saveGlobalConfig\(\{[\s\S]{0,220}?\}\)/g) ?? [];
-    expect(saves.length).toBeGreaterThanOrEqual(3);
-    for (const save of saves) {
-      expect(save).toContain('instantChatEnabled');
-    }
+  it('开关有独立立即落盘；连接沿用当前值，地址延迟保存不准拿旧值覆盖', () => {
+    const toggle = sliceSrc(settingsSrc, '即时对话立即落盘', 'const handleToggleInstantChat', '\n  const handleGenerateServerToken');
+    expect(toggle).toContain('saveGlobalConfig({ instantChatEnabled: next })');
+
+    const connect = sliceSrc(settingsSrc, '连接前保存', 'const handleConnect', '\n  const handleSelfUpdateWorker');
+    expect(connect).toContain('instantChatEnabled: config.instantChatEnabled');
+
+    const delayed = sliceSrc(settingsSrc, '全局配置延迟保存', 'const persistGlobalConfig', '\n  useEffect(() => {');
+    expect(delayed).not.toContain('instantChatEnabled');
   });
 });
 

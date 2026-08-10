@@ -158,3 +158,10 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - `失败于 xxx ms` 继续使用单次 fetch 的 `performance.now()` 实测 elapsed。长短耗时提示已改为不做阶段归因，避免把真实等待时长进一步误译成“长时间握手 / 代理黑洞”。
 - 修改文件：`context/OSContext.tsx`、`utils/networkFailureDiagnosis.ts`、`utils/networkFailureDiagnosis.test.ts`、`docs/HANDOFF.md`。没有修改 Worker、聊天存储、Memory Palace、备份、D1、请求 body 或任务 UUID；本轮不需要重新部署主动消息 Worker，只需发布前端。
 - 验证：`utils/networkFailureDiagnosis.test.ts` 34/34 通过；全量 Vitest 214 个文件、3112 项测试全部通过；Worker bundles 与 Vite 生产构建通过；`git diff --check` 通过。仍需真实网络人工确认 `/client-state` 单次失败不再出现红色 Network 日志、普通聊天最终失败只保留一条 Network 诊断，以及成功 retry 不弹首次错误。
+
+## 13. 2026-08-10 即时对话开关稳定性修正
+
+- 设置页对 Worker 地址 / 密钥的 1 秒延迟保存不再携带 `instantChatEnabled`。即时对话开关本来已有独立的立即落盘路径；旧实现可能用 effect 闭包里的旧值覆盖刚开启的开关，表现为偶发“自己关掉”。
+- `probeInstantChatSupport` 现在只在 Worker 明确返回有效 `config-check` 结果或 404 时更新能力存量。瞬时网络失败、5xx 和鉴权异常沿用上一次已验证结论，不再把 `instantChatSupported` 永久写成 false、要求用户反复进入设置页恢复。Worker 明确不支持时仍会阻止即时对话；实际 POST 失败仍明确报错，不增加重试、轮询或静默本地回退。
+- 修改文件：`components/settings/ActiveMsgGlobalSettingsModal.tsx`、`utils/activeMsgClient.ts`、对应测试及本交接文档。没有修改 Worker、推送订阅、聊天存储、Memory Palace、备份格式或角色卡字段。
+- 验证：主动消息客户端与即时对话接线专项 2 个文件、158 项通过；全量 Vitest 214 个文件、3115 项全部通过；Worker bundles 与 Vite 生产构建通过；`git diff --check` 通过。仍需发布前端后在真实 PWA 中确认：首次把通知与即时对话打开后，网络短暂断开并恢复不再把开关写回关闭或长期标成不支持。

@@ -352,7 +352,6 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
     await ActiveMsgStore.saveGlobalConfig({
       workerUrl: config.workerUrl,
       serverToken: config.serverToken,
-      instantChatEnabled: config.instantChatEnabled,
       // 一键部署生成的 Master Key 也要跟着存：这是本地唯一的一份，Worker 那边读不回来。
       masterKey: config.masterKey,
     });
