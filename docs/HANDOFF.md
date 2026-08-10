@@ -2,7 +2,7 @@
 
 > 最后更新：2026-08-10（Asia/Shanghai）
 > 维护对象：`Xiaoran71/SullyOS` 个人 fork
-> 干净上游基线：`ce7f1128`（`qegj567-cloud/SullyOS:master`）
+> 当前上游基线：`ec7ad049`（`qegj567-cloud/SullyOS:master`）
 > 发布分支：`master`（由 `codex/shortcut-clean-baseline-20260810` 验证后切换）
 
 ## 1. 当前目标
@@ -147,5 +147,5 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - `master` 已合入上游 `ec7ad049`。上游新增主动消息 2.0 的 `llm_credentials` / `credRefs` 凭据引用、服务端消息账本补收、识图 API 完整设置、故事世界书修正及相关诊断；旧 Worker 继续走内联凭据兼容路径，新 Worker 由 `/init-tenant` 幂等补齐新表，不要求用户手工迁移 D1。
 - 唯一文本冲突位于 `utils/activeMsgClient.ts` 的即时对话发送段。解决方式是完整保留上游 credRefs：凭据值变化时先上传，常态指纹命中时零额外请求，`CREDENTIAL_NOT_FOUND` 仍只补传自愈一次；随后在同一条调用上保留 fork 的固定 task UUID 与一次 400ms 网络重放。两次网络 attempt 复用相同加密 body，Worker 继续将 `TASK_UUID_CONFLICT` 解释为首个请求已落库，避免重复消息。
 - `worker/amsg/src/instantChat.ts`、对应测试和 `worker/amsg/worker.bundle.js` 均由 Git 三方自动合并，已核对 `taskUuid` 校验、冲突转 202、上游 server `2.6.0-next.19` 与 `llm-credentials` 能力仍同时存在。没有改动 D1 绑定、Secrets、Cron、备份格式、Memory Palace 或聊天数据。
-- 本地 `pnpm install --frozen-lockfile` 已下载 lockfile 内容，但 Codex 的最小发布时间策略拒绝为 2026-08-09 发布的 `@rei-standard/amsg-client@2.9.0-next.11` 和 `@rei-standard/amsg-server@2.6.0-next.19` 建立项目链接；未放宽或绕过该策略。因此本地完成了合并文件的 esbuild 语法打包、最终 Worker bundle `node --check` 和 `git diff --check`，完整测试与生产构建以推送后的 GitHub Actions 干净环境为最终发布闸门，结果需在部署完成后回填。
-- 发布仍需同步两部分：GitHub Pages 前端与用户自己的 `sullyos-amsg` 主动消息 Worker。后者是个人 Worker，不是原作者公共 Worker；保留既有 D1、AMSG/VAPID Secrets、Cron 和 URL 原样覆盖代码即可。
+- 本地 `pnpm install --frozen-lockfile` 已下载 lockfile 内容，但 Codex 的最小发布时间策略拒绝为 2026-08-09 发布的 `@rei-standard/amsg-client@2.9.0-next.11` 和 `@rei-standard/amsg-server@2.6.0-next.19` 建立项目链接；未放宽或绕过该策略。因此本地完成了合并文件的 esbuild 语法打包、最终 Worker bundle `node --check` 和 `git diff --check`。GitHub Pages 对合并提交 `505509e8` 的干净环境安装与生产构建已成功；本轮未在本地补跑全量 Vitest，不能将其描述为已通过。
+- GitHub Pages 前端已经发布。用户自己的 `sullyos-amsg` 主动消息 / 即时对话 Worker 通过既有 `Xiaoran71/sullyos-workers` Git 集成同步，仅修改 `amsg/worker.bundle.js` 并产生部署仓库提交 `0b2f425a`；Cloudflare 构建成功，版本 `c9cd2f16` 已成为 100% 流量的 Active deployment。部署没有修改既有 D1、AMSG/VAPID Secrets、Cron 或 `sullyos-amsg.rlbxgkpl.workers.dev` URL；仍需用户在真实网络环境完成人工验收。
