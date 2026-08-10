@@ -410,6 +410,14 @@ export const handleInstantChat = async (args: {
   if (!isEncryptedEnvelope(body.taskPayload)) {
     return fail(400, 'INVALID_TASK_PAYLOAD', 'taskPayload 必须是加密信封（iv / authTag / encryptedData）');
   }
+  // 新客户端带 taskUuid 供网络失败后幂等重放；旧客户端没有这个字段时照旧单次受理，
+  // 避免 Worker 先更新、前端缓存还没刷新时把原有即时对话直接打断。
+  const taskUuid = typeof body.taskUuid === 'string' && UUID_V4_RE.test(body.taskUuid)
+    ? body.taskUuid
+    : null;
+  if (body.taskUuid !== undefined && !taskUuid) {
+    return fail(400, 'INVALID_TASK_UUID', 'taskUuid 必须是 UUID v4');
+  }
 
   // ── 内部转发：路径跟着本次请求的挂载点走（上游按后缀匹配，worker 可能挂在子路径下）。
   const requestUrl = new URL(request.url);
@@ -500,7 +508,9 @@ export const handleInstantChat = async (args: {
     env,
   );
   const taskBody = await readBody(taskResponse);
-  if (!taskResponse.ok) {
+  const taskUuidConflict = !!taskUuid && taskResponse.status === 409
+    && (taskBody as { error?: { code?: unknown } } | null)?.error?.code === 'TASK_UUID_CONFLICT';
+  if (!taskResponse.ok && !taskUuidConflict) {
     const taskCause = readUpstreamCause(taskResponse.status, taskBody);
     return json(taskResponse.status, {
       success: false,
@@ -513,7 +523,11 @@ export const handleInstantChat = async (args: {
       },
     });
   }
-  const uuid = (taskBody as { data?: { uuid?: unknown } } | null)?.data?.uuid;
+  // 同一 POST 的首个响应若在回程丢失，客户端会用同一个 taskUuid 重放一次。上游唯一
+  // 索引回 TASK_UUID_CONFLICT，说明那条任务已经落库；把它当作同一次受理继续返回即可。
+  const uuid = taskUuidConflict
+    ? taskUuid!
+    : (taskBody as { data?: { uuid?: unknown } } | null)?.data?.uuid;
   if (typeof uuid !== 'string' || !uuid) {
     return fail(502, 'INSTANT_CHAT_TASK_UUID_MISSING', '上游没有回任务 uuid，无法跟踪这一轮', {
       step: 'schedule-message',

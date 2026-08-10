@@ -368,7 +368,13 @@ export async function safeFetchJson(
         const requestId = `api-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         // 每次 attempt 建一个独立的 AbortController（仅用于 timeout）
         // 调用方自己的 options.signal 仍然有效，两者任一触发就 abort
-        let attemptOptions = { ...metaOptions, __sullyApiCallId: requestId } as RequestInit;
+        let attemptOptions = {
+            ...metaOptions,
+            __sullyApiCallId: requestId,
+            // 全局 fetch 拦截器仍记录这次 attempt，但上层还有 retry 时不立刻点亮
+            // SYSTEM ERROR；最后一次失败才给用户看。该字段只在本页读取，原生 fetch 会忽略。
+            __sullyTransientRetryPending: attempt < maxRetries,
+        } as RequestInit;
         let timeoutHandle: any = null;
         if (timeoutMs > 0) {
             const ac = new AbortController();

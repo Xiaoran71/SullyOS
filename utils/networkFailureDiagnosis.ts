@@ -32,6 +32,8 @@ export interface FetchFailureContext {
     method?: string;
     /** 从发起到抛错的毫秒数。 */
     durationMs?: number;
+    /** performance.now() 口径的请求起点，用于只关联本次 Resource Timing entry。 */
+    requestStartTimeMs?: number;
     error?: unknown;
     /** 以下三项默认读全局，测试里显式传。 */
     online?: boolean;
@@ -133,6 +135,7 @@ const VERDICTS: Record<FetchFailureKind, { verdict: string; causes: string }> = 
 export const readResourceTimingHint = (
     href: string,
     perf?: { getEntriesByName?: (name: string, type?: string) => any[] },
+    requestStartTimeMs?: number,
 ): string => {
     const target = perf ?? (typeof performance !== 'undefined' ? (performance as any) : undefined);
     if (!target?.getEntriesByName) return '';
@@ -142,8 +145,18 @@ export const readResourceTimingHint = (
     } catch {
         return '';
     }
-    const entry = entries[entries.length - 1];
-    if (!entry) return 'Resource Timing: 没有这条请求的记录（通常说明连接压根没建立起来，或被扩展在发出前就拦掉了）';
+    const candidates = typeof requestStartTimeMs === 'number'
+        ? entries.filter((entry) => (
+            typeof entry?.startTime === 'number'
+            && Math.abs(entry.startTime - requestStartTimeMs) <= 250
+        ))
+        : entries;
+    const entry = candidates[candidates.length - 1];
+    if (!entry) {
+        return typeof requestStartTimeMs === 'number'
+            ? 'Resource Timing: 没有可靠匹配到本次请求的记录（不引用同 URL 的旧请求）'
+            : 'Resource Timing: 没有这条请求的记录（通常说明连接压根没建立起来，或被扩展在发出前就拦掉了）';
+    }
     const parts: string[] = [];
     if (typeof entry.responseStatus === 'number') parts.push(`responseStatus=${entry.responseStatus}`);
     if (typeof entry.transferSize === 'number') parts.push(`transferSize=${entry.transferSize}`);
@@ -165,7 +178,7 @@ export const readStallHint = (durationMs?: number, kind?: FetchFailureKind): str
     if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) return '';
     if (kind && kind !== 'blocked' && kind !== 'timeout' && kind !== 'unknown') return '';
     if (durationMs >= 5000) {
-        return `耗时线索: 挂了 ${(durationMs / 1000).toFixed(1)}s 才失败、且一个字节都没收到 → 连接建立阶段被吞（握手没人应答），不是「立刻被拒」。这种形态最常见的是：该域名没走代理走了直连、或代理节点到上游是黑洞。优先换节点 / 把该域名显式加进代理规则。`;
+        return `耗时线索: 本次请求实际经过 ${(durationMs / 1000).toFixed(1)}s 后、仍在拿到响应头前失败 → 连接建立阶段被吞的可能性较高，不是「立刻被拒」。这种形态常见于该域名没走代理、或代理节点到上游无响应。优先换节点 / 把该域名显式加进代理规则。`;
     }
     if (durationMs <= 300) {
         return `耗时线索: ${Math.round(durationMs)}ms 就失败，属于「立刻被拒」→ DNS 解析不到、浏览器扩展或防火墙在发出前拦掉、代理直接拒绝连接。不像是线路慢或被墙。`;
@@ -199,7 +212,7 @@ export const buildFetchFailureDetail = (
     }
     if (pageOrigin) lines.push(`本页来源: ${pageOrigin}`);
     lines.push(`浏览器联网状态: ${online === false ? '离线' : '在线'}`);
-    const timing = readResourceTimingHint(target.href, opts?.perf);
+    const timing = readResourceTimingHint(target.href, opts?.perf, ctx.requestStartTimeMs);
     if (timing) lines.push(timing);
     const stall = readStallHint(ctx.durationMs, kind);
     if (stall) lines.push(stall);

@@ -863,6 +863,8 @@ export const describeInstantChatFailure = (status: number, body: any): string =>
 
 /** client_state 上传每次尝试前等多久：数组长度即总尝试次数（首次不等）。 */
 const CLIENT_STATE_BACKOFF_MS = [0, 400, 1200];
+/** 即时对话外层 POST 只在网络层没拿到响应时短重试一次。 */
+const INSTANT_CHAT_NETWORK_RETRY_DELAY_MS = 400;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1911,9 +1913,13 @@ export const ActiveMsgClient = {
       chat: { messages: toFirePackChatMessages(chatMessages), builtAt: now },
     };
 
-    const clientTaskId = crypto.randomUUID();
+    // 上游原生支持调用方指定 uuid，scheduled_messages 也有 uuid 唯一索引。固定住它后，
+    // 同一份 POST 因回包丢失而重放时只会命中 TASK_UUID_CONFLICT，不会再建第二条任务。
+    const taskUuid = crypto.randomUUID();
+    const clientTaskId = `${taskUuid}-c`;
     const remoteAvatarUrl = toRemoteAvatarUrl(char.avatar);
     const taskPayload: Record<string, unknown> = {
+      uuid: taskUuid,
       contactName: char.name,
       ...(remoteAvatarUrl ? { avatarUrl: remoteAvatarUrl } : {}),
       // 用 'auto' 而不是 'instant'：'instant' 在上游是「当场跑完」的行型，走不到 fire hooks，
@@ -1978,12 +1984,33 @@ export const ActiveMsgClient = {
       encryptPayload(client, taskPayload),
     ]);
 
-    const { status, body } = await fetchWithAuthRaw('instant-chat', globalConfig, {
-      method: 'POST',
-      // 外壳是明文：里头两个信封已经加密好，别再给外壳挂加密头（包装层会当它是整体密文）。
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ statePayload, taskPayload: encryptedTask }),
-    }, '即时对话');
+    const requestBody = JSON.stringify({ statePayload, taskPayload: encryptedTask, taskUuid });
+    let response: { status: number; body: any } | undefined;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetchWithAuthRaw('instant-chat', globalConfig, {
+          method: 'POST',
+          // 外壳是明文：里头两个信封已经加密好，别再给外壳挂加密头（包装层会当它是整体密文）。
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+          // 第一次瞬时失败交给下面的同 UUID 重放；全局拦截器只在最终失败时提示。
+          ...({ __sullyTransientRetryPending: attempt === 0 } as RequestInit),
+        }, '即时对话');
+        break;
+      } catch (error) {
+        if (attempt > 0 || readAmsgFailKind(error) !== '网络失败') throw error;
+        await delay(INSTANT_CHAT_NETWORK_RETRY_DELAY_MS);
+      }
+    }
+    const { status, body } = response!;
+
+    // 新前端短暂打到旧 Worker 时，旧包装层还不会把同 UUID 冲突翻成 202；但上游回执
+    // 已经明确证明首个 POST 把任务落库了。沿用同一个 uuid 进入待收即可，不让部署先后
+    // 顺序制造一条假的“发送失败”。
+    const duplicateAccepted = status === 409
+      && body?.error?.code === 'INSTANT_CHAT_TASK_FAILED'
+      && body?.error?.upstream?.error?.code === 'TASK_UUID_CONFLICT';
+    if (duplicateAccepted) return { uuid: taskUuid, clientTaskId };
 
     if (status !== 202 || typeof body?.uuid !== 'string' || !body.uuid) {
       throw new Error(describeInstantChatFailure(status, body));

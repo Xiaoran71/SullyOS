@@ -92,6 +92,7 @@ const post = (
 const validBody = (extra: Record<string, unknown> = {}) => ({
   statePayload: envelope('state'),
   taskPayload: envelope('task'),
+  taskUuid: TASK_UUID,
   ...extra,
 });
 
@@ -194,6 +195,23 @@ describe('POST /instant-chat — 请求体', () => {
 });
 
 describe('POST /instant-chat — 严格顺序与失败传播', () => {
+  it('旧客户端缺 taskUuid 仍照常受理（只是没有自动重放能力）', async () => {
+    const { upstream } = makeUpstream();
+    const response = await run({
+      request: post({ statePayload: envelope('state'), taskPayload: envelope('task') }),
+      upstream,
+    });
+    expect(response.status).toBe(202);
+  });
+
+  it('带了非法 taskUuid 立刻 400，不转发', async () => {
+    const { upstream, calls } = makeUpstream();
+    const response = await run({ request: post(validBody({ taskUuid: 'not-a-uuid' })), upstream });
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error.code).toBe('INVALID_TASK_UUID');
+    expect(calls).toHaveLength(0);
+  });
+
   it('顺序：先传云端状态，再建任务', async () => {
     const { upstream, paths } = makeUpstream();
     const response = await run({ request: post(validBody()), upstream });
@@ -294,6 +312,21 @@ describe('POST /instant-chat — 严格顺序与失败传播', () => {
     const response = await run({ request: post(validBody()), upstream });
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ status: 'accepted', uuid: TASK_UUID });
+  });
+
+  it('同 taskUuid 重放命中唯一索引时仍返回同一次受理', async () => {
+    const tick = makeTick();
+    const { upstream, calls } = makeUpstream({
+      scheduleMessage: {
+        status: 409,
+        body: { success: false, error: { code: 'TASK_UUID_CONFLICT', message: 'already exists' } },
+      },
+    });
+    const response = await run({ request: post(validBody()), upstream, tick });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ status: 'accepted', uuid: TASK_UUID });
+    expect(calls.filter((call) => call.path.endsWith('/schedule-message'))).toHaveLength(1);
+    expect(tick.kicks).toEqual([{ instance: TASK_UUID, uuid: TASK_UUID }]);
   });
 });
 

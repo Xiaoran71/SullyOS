@@ -161,6 +161,49 @@ describe('POST /instant-chat 的形状', () => {
     expect(headers.get('X-Encryption-Version')).toBeNull();
   });
 
+  it('taskUuid 同时固定在外壳和加密任务里，供网络失败后安全重放', async () => {
+    const { call, task } = await postOnce([{ role: 'user', content: '在吗' }]);
+    const body = JSON.parse(String(call.init.body));
+    expect(body.taskUuid).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(task.uuid).toBe(body.taskUuid);
+    expect(task.metadata.amsgClientTaskId).toBe(`${body.taskUuid}-c`);
+  });
+
+  it('POST 第一次网络失败只短重放一次，而且两次 body 完全相同', async () => {
+    stubFirePackDeps();
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    let instantAttempts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      if (!String(url).includes('/instant-chat')) {
+        return new Response(JSON.stringify({ success: true, data: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      instantAttempts += 1;
+      if (instantAttempts === 1) throw new TypeError('Load failed');
+      return {
+        status: 202,
+        ok: true,
+        json: async () => ({ status: 'accepted', uuid: 'uuid-after-retry' }),
+        text: async () => JSON.stringify({ status: 'accepted', uuid: 'uuid-after-retry' }),
+        headers: { get: () => 'application/json' },
+      } as any;
+    }));
+
+    await expect(ActiveMsgClient.sendInstantChat({
+      char: CHAR, chatMessages: [{ role: 'user', content: '在吗' }], api: API,
+      userProfile: USER, groups: [], realtimeConfig: {} as any,
+    })).resolves.toMatchObject({ uuid: 'uuid-after-retry' });
+
+    const posts = calls.filter((call) => String(call.url).includes('/instant-chat'));
+    expect(posts).toHaveLength(2);
+    expect(posts[0].init.body).toBe(posts[1].init.body);
+    expect((posts[0].init as any).__sullyTransientRetryPending).toBe(true);
+    expect((posts[1].init as any).__sullyTransientRetryPending).toBe(false);
+  });
+
   it('任务行型是 auto + none，身份标着 instant', async () => {
     const { task } = await postOnce([{ role: 'user', content: '在吗' }]);
     // 'instant' 在上游是「当场跑完」的行型，走不到 fire hooks，chat 段就白传了。

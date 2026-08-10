@@ -32,13 +32,17 @@
   ```jsonc
   {
     "statePayload": "<加密信封：即 PUT /client-state 的完整 body>",
-    "taskPayload": "<加密信封：即 POST /schedule-message 的完整 body>"
+    "taskPayload": "<加密信封：即 POST /schedule-message 的完整 body>",
+    "taskUuid": "<与 taskPayload 内 uuid 相同的 UUID v4>"
   }
   ```
 
   taskPayload（信封内）固定带 `immediate: true`（amsg-server 2.6.0-next.15 起：
   落库即到期，不带 `firstSendTime`）；顶替上一条时带 `supersedesUuid`（上游在
   建新任务的同一事务里取消旧的，原子）。外壳不再有明文 supersedesUuid。
+  `taskUuid` 只用于一次网络层重放的幂等确认：前端两次 POST 必须复用完全相同的
+  body；上游若返回 `TASK_UUID_CONFLICT`，包装层按同一任务已落库返回 202。为兼容
+  旧前端，Worker 暂时允许缺少外壳 `taskUuid`，但新前端必须发送。
 
 - 处理步骤（严格顺序，两个 await 失败即向客户端返回明确错误，不落任务）：
   1. 内部 `upstream.fetch` 转发 `PUT /client-state`（statePayload）→ 必须成功。
@@ -140,7 +144,8 @@
   能力 → 尽力补发一条 `messageKind: 'error'`（SW 已有该分轨）。拿不到就算了，
   别为此改上游。
 - POST `/instant-chat` 任何一步 await 失败 → 客户端收到明确错误 → 界面报
-  发送失败可重试。**绝不静默转回本地生成**。
+  发送失败可重试。若外层 POST 没拿到任何 HTTP 响应，客户端只短重放一次同一
+  `taskUuid` 的相同请求；400/401/403 和其他明确业务响应不重试。**绝不静默转回本地生成**。
 
 ## 已拍板的行为语义
 

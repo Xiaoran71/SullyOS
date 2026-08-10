@@ -47,4 +47,30 @@ describe('safeFetchJson API log fallback', () => {
             meta,
         }));
     });
+
+    it('marks retryable attempts so the global interceptor only surfaces the final failure', async () => {
+        vi.useFakeTimers();
+        try {
+            const fetchMock = vi.spyOn(globalThis, 'fetch')
+                .mockRejectedValueOnce(new TypeError('Load failed'))
+                .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' },
+                }));
+
+            const pending = safeFetchJson(
+                'https://api.test/v1/chat/completions',
+                { method: 'POST', body: '{}' },
+                1,
+            );
+            await vi.advanceTimersByTimeAsync(1100);
+            await pending;
+
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            expect((fetchMock.mock.calls[0][1] as any).__sullyTransientRetryPending).toBe(true);
+            expect((fetchMock.mock.calls[1][1] as any).__sullyTransientRetryPending).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

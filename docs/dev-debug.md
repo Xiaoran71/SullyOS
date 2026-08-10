@@ -387,7 +387,8 @@ Resource Timing: responseStatus=429, transferSize=0 → 对方其实回了 HTTP 
 
 两个关键设计：
 
-1. **Resource Timing 的 `responseStatus`**：跨域也能读（不受 TAO 限制）。它 > 0 就说明**对方其实回了**，
+1. **Resource Timing 的 `responseStatus`**：只使用 `startTime` 与本次 `performance.now()` 起点相符的条目，
+   找不到可靠匹配就明确省略，不拿同 URL 的旧请求或另一次 retry 冒充本次。跨域时若能读到 `responseStatus > 0`，就说明**对方其实回了**，
    那就是 CORS / 限流页的事，跟网络通不通无关——这一条直接把排查范围砍一半。
 2. **no-cors 连通性复检**：`mode: 'no-cors'` 不做 CORS 校验，只要网络路径通就会拿到 opaque 响应。
    它成功而原请求失败 ⇒ 响应头的问题；它也失败 ⇒ 这台设备到这个域名是真的不通。结论异步回填到同一条日志。
@@ -407,7 +408,9 @@ Resource Timing: responseStatus=429, transferSize=0 → 对方其实回了 HTTP 
 
 `readStallHint()` 拿耗时区分两种截然相反的形态，这是 JS 侧唯一能拿到的这条线索：
 
-- **挂几秒到几十秒才失败、transferSize 0** ⇒ 握手没人应答（黑洞）。查代理分流规则、换节点。
+- “失败于 N ms”用单次 fetch attempt 的 `performance.now()` 起点到抛错时刻计算，表示实际经过时间，
+  不是 timeout 配置；重试会有各自独立计时。没有可靠单调时钟时省略该数字。
+- **实际挂几秒到几十秒、仍未拿到响应头** ⇒ 连接建立阶段无响应的可能性较高。查代理分流规则、换节点。
 - **几十毫秒就失败** ⇒ 有人明确说不。查 DNS、扩展、防火墙。
 
 中间地带（0.3–5s）不硬猜，宁可不输出——瞎猜比不说更容易把人带偏。
@@ -416,11 +419,15 @@ Resource Timing: responseStatus=429, transferSize=0 → 对方其实回了 HTTP 
 
 - **复检必须用 `originalFetch`**（拦截器闭包里那个未打补丁的），用打过补丁的 `window.fetch` 会让探测自己
   失败时再写一条日志，一条网络错误滚成一屏。
+- fetch 与 console.error 补丁的 effect 必须在 cleanup 中只恢复自己安装的函数；否则 Provider 经
+  StrictMode / HMR / 重挂载后会叠两层监听，同一次失败出现两条几乎同 timestamp 的日志。
 - **复检打的是域名根路径，不是原地址**：原地址可能是有副作用的接口（发帖、下单），复检不该顺手触发它；
   而 DNS / 梯子 / 防火墙 / 扩展拦的都是整个域名，打根路径一样测得出来。
 - **同域名 30s 冷却**：一串请求同时炸时不能对同一个域名连打探测；冷却命中返回 `cooldown`，
   日志里明说「看上一条」，不能一声不吭让人以为漏了。
 - **哪些类要复检看 `shouldProbeReachability()`**：主动取消 / 混合内容 / 地址非法 / 离线已经有确定结论，再打一次纯属浪费。
+- 上层已声明还有 retry 的 attempt 只保留后台 API 记录，不写用户可见 `SYSTEM ERROR`，也不做 no-cors 复检；
+  最终 attempt 失败才写一条并复检，避免一次瞬时失败变成重复红色日志和额外探测。
 - 判定全是纯函数，回归守卫在 `utils/networkFailureDiagnosis.test.ts`——改文案时先看那份测试想守的是什么。
 
 ### 用户侧自查清单

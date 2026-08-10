@@ -207,6 +207,25 @@ describe('readResourceTimingHint', () => {
         expect(hint).toContain('503');
     });
 
+    it('给了本次请求起点时不借用同 URL 的旧 attempt', () => {
+        const hint = readResourceTimingHint('https://a.example.com/x', {
+            getEntriesByName: () => [
+                { startTime: 100, responseStatus: 503, duration: 12000 },
+                { startTime: 9000, responseStatus: 0, duration: 1866 },
+            ],
+        }, 9000);
+        expect(hint).toContain('duration=1866ms');
+        expect(hint).not.toContain('12000');
+    });
+
+    it('没有匹配本次起点的 entry 时宁可不引用旧数据', () => {
+        const hint = readResourceTimingHint('https://a.example.com/x', {
+            getEntriesByName: () => [{ startTime: 100, duration: 12000 }],
+        }, 9000);
+        expect(hint).toContain('没有可靠匹配');
+        expect(hint).not.toContain('12000');
+    });
+
     it('performance 不可用时静默返回空串，不能抛', () => {
         expect(readResourceTimingHint('https://a.example.com/x', {})).toBe('');
         expect(readResourceTimingHint('https://a.example.com/x', {

@@ -6544,6 +6544,10 @@ var handleInstantChat = async (args) => {
   if (!isEncryptedEnvelope2(body.taskPayload)) {
     return fail2(400, "INVALID_TASK_PAYLOAD", "taskPayload \u5FC5\u987B\u662F\u52A0\u5BC6\u4FE1\u5C01\uFF08iv / authTag / encryptedData\uFF09");
   }
+  const taskUuid = typeof body.taskUuid === "string" && UUID_V4_RE.test(body.taskUuid) ? body.taskUuid : null;
+  if (body.taskUuid !== void 0 && !taskUuid) {
+    return fail2(400, "INVALID_TASK_UUID", "taskUuid \u5FC5\u987B\u662F UUID v4");
+  }
   const requestUrl = new URL(request.url);
   const mountPath = requestUrl.pathname.replace(/\/+$/, "").replace(/\/instant-chat$/, "");
   const internalUrl = (path) => {
@@ -6618,7 +6622,8 @@ var handleInstantChat = async (args) => {
     env
   );
   const taskBody = await readBody(taskResponse);
-  if (!taskResponse.ok) {
+  const taskUuidConflict = !!taskUuid && taskResponse.status === 409 && taskBody?.error?.code === "TASK_UUID_CONFLICT";
+  if (!taskResponse.ok && !taskUuidConflict) {
     const taskCause = readUpstreamCause(taskResponse.status, taskBody);
     return json(taskResponse.status, {
       success: false,
@@ -6631,7 +6636,7 @@ var handleInstantChat = async (args) => {
       }
     });
   }
-  const uuid = taskBody?.data?.uuid;
+  const uuid = taskUuidConflict ? taskUuid : taskBody?.data?.uuid;
   if (typeof uuid !== "string" || !uuid) {
     return fail2(502, "INSTANT_CHAT_TASK_UUID_MISSING", "\u4E0A\u6E38\u6CA1\u6709\u56DE\u4EFB\u52A1 uuid\uFF0C\u65E0\u6CD5\u8DDF\u8E2A\u8FD9\u4E00\u8F6E", {
       step: "schedule-message"

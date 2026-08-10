@@ -1052,7 +1052,25 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   : resource instanceof URL
                       ? resource.href
                       : String(resource);
-          const fetchStartedAt = Date.now();
+          const monotonicNow = () => (
+              typeof performance !== 'undefined' && typeof performance.now === 'function'
+                  ? performance.now()
+                  : null
+          );
+          let fetchStartedAt = monotonicNow();
+          const elapsedMs = () => {
+              const now = monotonicNow();
+              return now == null || fetchStartedAt == null
+                  ? undefined
+                  : Math.max(0, Math.round(now - fetchStartedAt));
+          };
+          const requestMethod = (typeof Request !== 'undefined' && resource instanceof Request)
+              ? resource.method.toUpperCase()
+              : ((config as RequestInit | undefined)?.method || 'GET').toUpperCase();
+          const retryUserKeyOnce = requestMethod === 'GET' && (() => {
+              try { return new URL(urlStr, window.location.href).pathname.endsWith('/get-user-key'); }
+              catch { return false; }
+          })();
           // Bare fetch calls do not carry explicit metadata. Snapshot the active
           // App now; reading the ambient value after a long response would label
           // the request as whichever App the user navigated to in the meantime.
@@ -1100,7 +1118,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           try {
-              let response = await originalFetch(...sendArgs);
+              let response: Response;
+              try {
+                  response = await originalFetch(...sendArgs);
+              } catch (error) {
+                  const kind = classifyFetchFailure({ url: urlStr, error });
+                  if (!retryUserKeyOnce || (kind !== 'blocked' && kind !== 'timeout')) throw error;
+                  // get-user-key 是无副作用 GET。只在没拿到业务响应时短重试一次；401/403
+                  // 会正常返回 Response，不会走这里，也就不会被当成瞬时网络问题吞掉。
+                  await new Promise(resolve => setTimeout(resolve, 400));
+                  fetchStartedAt = monotonicNow();
+                  response = await originalFetch(...sendArgs);
+              }
 
               // 兜底：模型没被上面清单覆盖但仍拒收采样参数时，读 400 报文自愈——摘掉后重试一次。
               if (!response.ok && response.status === 400 && urlStr.includes('/chat/completions')) {
@@ -1151,18 +1180,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   try { usageClone = response.clone(); } catch { usageClone = null; }
                   if (usageClone) {
                       usageClone.text().then((t) => {
-                          const durationMs = Date.now() - fetchStartedAt;
+                          const durationMs = elapsedMs();
                           let parsed: any = undefined;
                           try { parsed = JSON.parse(t); } catch { /* 流式/非 JSON：把原始文本交给 recordApiCall 的 SSE 兜底解析 */ }
                           updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok, response: parsed, responseText: parsed === undefined ? t : undefined });
                           recordApiCall({ requestId, url: urlStr, body, status, ok, response: parsed, responseText: parsed === undefined ? t : undefined, meta, durationMs });
                       }).catch(() => {
                           updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok });
-                          recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: Date.now() - fetchStartedAt });
+                          recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: elapsedMs() });
                       });
                   } else {
                       updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok });
-                      recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: Date.now() - fetchStartedAt });
+                      recordApiCall({ requestId, url: urlStr, body, status, ok, meta, durationMs: elapsedMs() });
                   }
               }
 
@@ -1208,22 +1237,23 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               // Network Failure
               if (urlStr.includes('/chat/completions')) {
                   updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok: false });
-                  recordApiCall({ requestId: (config as any)?.__sullyApiCallId, url: urlStr, body: (sendArgs[1] as any)?.body, ok: false, meta: (config as any)?.__sullyMeta || ambientMetaAtStart, durationMs: Date.now() - fetchStartedAt });
+                  recordApiCall({ requestId: (config as any)?.__sullyApiCallId, url: urlStr, body: (sendArgs[1] as any)?.body, ok: false, meta: (config as any)?.__sullyMeta || ambientMetaAtStart, durationMs: elapsedMs() });
               }
-              if (!isAnalyticsRequestUrl(urlStr)) {
+              // safeFetchJson / 即时对话明确还会重试时，保留后台 API 记录，但不提前点亮
+              // SYSTEM ERROR，也不做 no-cors 复检。最终 attempt 仍失败时会正常落一条可见错误。
+              const retryPending = (config as any)?.__sullyTransientRetryPending === true;
+              if (!isAnalyticsRequestUrl(urlStr) && !retryPending) {
                   // 光秃秃一句 "Failed to fetch" + 一个 URL 排查不了任何东西（社区里这条卡过好几个人）。
                   // 这里把浏览器肯在 JS 侧交出来的旁证一次性补齐：方法、耗时、在线状态、是否跨域、
                   // Resource Timing 里那条记录，再给一句初判；随后异步做一次 no-cors 连通性复检，
                   // 结论回填到同一条日志上——「网络不通」和「网络通但响应被 CORS 拦」要走的排查路
                   // 完全相反，不分开的话用户只能瞎试。详见 utils/networkFailureDiagnosis.ts。
                   const logId = `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  const method = (typeof Request !== 'undefined' && resource instanceof Request)
-                      ? resource.method
-                      : ((config as RequestInit | undefined)?.method || 'GET');
                   const baseDetail = buildFetchFailureDetail({
                       url: urlStr,
-                      method,
-                      durationMs: Date.now() - fetchStartedAt,
+                      method: requestMethod,
+                      durationMs: elapsedMs(),
+                      requestStartTimeMs: fetchStartedAt ?? undefined,
                       error: err,
                   });
                   setSystemLogs(prev => [{
@@ -1266,7 +1296,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
 
       const originalConsoleError = console.error;
-      console.error = (...args) => {
+      const patchedConsoleError = (...args: Parameters<typeof console.error>) => {
           originalConsoleError(...args);
           const msg = args.map(a => (a instanceof Error ? a.message : String(a))).join(' ');
           // detail 只有真拿到堆栈才用堆栈，否则回退完整 msg。
@@ -1288,6 +1318,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               message: msg.substring(0, 100),
               detail: stacks || msg
           }, ...prev.slice(0, 49)]);
+      };
+      console.error = patchedConsoleError;
+
+      // Provider 被 StrictMode / HMR 或页面结构重挂载时，必须先拆掉这一层。否则新实例会
+      // 再包一层 fetch / console.error，同一个失败就会被两个监听器记成同 timestamp 日志。
+      return () => {
+          if (window.fetch === patchedFetch) window.fetch = originalFetch;
+          if (console.error === patchedConsoleError) console.error = originalConsoleError;
+          interceptorsInitialized.current = false;
       };
   }, []);
 
