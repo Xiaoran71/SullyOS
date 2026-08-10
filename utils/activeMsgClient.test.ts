@@ -61,11 +61,11 @@ const TEST_USER_ID = '3f2b1c8a-9d4e-4a1b-8c2d-000000000001';
 vi.mock('./activeMsgStore', () => ({
   ActiveMsgStore: {
     ensureUserId: async () => TEST_USER_ID,
-    getGlobalConfig: vi.fn(async () => ({
+    getGlobalConfig: async () => ({
       userId: TEST_USER_ID,
       workerUrl: 'https://amsg.example.workers.dev',
       serverToken: '',
-    })),
+    }),
     // connect() 成功那条路会落盘 initializedAt，走失败分支的用例碰不到它。
     saveGlobalConfig: vi.fn().mockResolvedValue(undefined),
   },
@@ -386,47 +386,6 @@ describe('即时对话能力探测（instantTick）', () => {
     configCheck({ instantChat: true, instantTick: true });
     await ActiveMsgClient.probeInstantChatSupport();
     expect(ActiveMsgStore.saveGlobalConfig).toHaveBeenCalledWith({ instantChatSupported: true });
-  });
-
-  it('临时网络失败沿用上一次支持结论，不把即时对话长期打回关闭', async () => {
-    const { ActiveMsgStore } = await import('./activeMsgStore');
-    (ActiveMsgStore.getGlobalConfig as any).mockResolvedValueOnce({
-      userId: TEST_USER_ID,
-      workerUrl: 'https://amsg.example.workers.dev',
-      serverToken: '',
-      instantChatSupported: true,
-    });
-    (ActiveMsgStore.saveGlobalConfig as any).mockClear();
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Load failed')));
-
-    expect(await ActiveMsgClient.probeInstantChatSupport()).toBe(true);
-    expect(ActiveMsgStore.saveGlobalConfig).not.toHaveBeenCalled();
-  });
-
-  it('Worker 5xx 沿用上一次支持结论，明确 404 才记为不支持', async () => {
-    const { ActiveMsgStore } = await import('./activeMsgStore');
-    (ActiveMsgStore.getGlobalConfig as any).mockResolvedValue({
-      userId: TEST_USER_ID,
-      workerUrl: 'https://amsg.example.workers.dev',
-      serverToken: '',
-      instantChatSupported: true,
-    });
-    (ActiveMsgStore.saveGlobalConfig as any).mockClear();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      status: 503,
-      text: async () => JSON.stringify({ success: false }),
-      headers: new Headers({ 'content-type': 'application/json' }),
-    }));
-    expect(await ActiveMsgClient.probeInstantChatSupport()).toBe(true);
-    expect(ActiveMsgStore.saveGlobalConfig).not.toHaveBeenCalled();
-
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      status: 404,
-      text: async () => JSON.stringify({ success: false }),
-      headers: new Headers({ 'content-type': 'application/json' }),
-    }));
-    expect(await ActiveMsgClient.probeInstantChatSupport()).toBe(false);
-    expect(ActiveMsgStore.saveGlobalConfig).toHaveBeenCalledWith({ instantChatSupported: false });
   });
 });
 

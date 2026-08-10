@@ -2382,31 +2382,26 @@ export const ActiveMsgClient = {
    * 第一下常常是「代码新了、版本号也对上了、绑定却没接上」，这条路只能回 503。看版本号
    * 的话前端会一边说「已经是最新版」一边发一条挂一条。
    *
-   * 老 bundle 明确返回 404、或成功响应里没有起跳器时记 false；网络失败 / 5xx / 鉴权失败
-   * 只沿用上一次结论。瞬时故障不能把一台已经验证可用的 Worker 永久打回“不支持”，否则
-   * 用户只能反复进设置页重新探测；真正发送失败仍由 POST /instant-chat 明确报错，不静默回退。
+   * 探不到一律 false（老 bundle 根本没这个字段，网络不通也是 false）：这一档会让即时对话
+   * 整个让位给本地生成，宁可少一个后台能力，也不要「开关亮着、发一条挂一条」。
    *
    * 结论顺手存进全局配置（`instantChatSupported`）：真正拦下这一轮的是发消息那条路上的
    * resolveInstantChatReadiness，而它不做逐调用网络探测，只认这份存量。所以每探一次就
    * 刷一次，用户更新完 Worker 后下一次探测自然把它翻回来，不用手动去重开开关。
    */
   async probeInstantChatSupport(): Promise<boolean> {
-    let previous = false;
-    let supported: boolean;
+    let supported = false;
     try {
       const config = await ensureWorkerReady();
-      previous = config.instantChatSupported === true;
       const { status, body } = await fetchWithAuthRaw('config-check', config, { method: 'GET' }, '即时对话能力探测');
-      const conclusive = (status === 200 && body?.success === true) || status === 404;
-      if (!conclusive) return previous;
-      supported = status === 200 && body?.data?.instantTick === true;
+      supported = status === 200 && body?.success === true && body?.data?.instantTick === true;
     } catch {
-      return previous;
+      supported = false;
     }
     try {
       await ActiveMsgStore.saveGlobalConfig({ instantChatSupported: supported });
     } catch (error) {
-      // 存不下只是这份结论留不到下次；本次设置页仍按刚探到的真实结果显示。
+      // 存不下只是这一轮的判断留不到下次，探测结论本身照常返回。
       console.warn('[AmsgInstantChat] 能力探测结果没存下来（下次发消息按上一次的存量判断）', error);
     }
     return supported;
