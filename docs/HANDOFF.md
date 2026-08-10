@@ -141,3 +141,11 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - 重要文件：`context/OSContext.tsx`、`utils/safeApi.ts`、`utils/networkFailureDiagnosis.ts`、`utils/activeMsgClient.ts`、`worker/amsg/src/instantChat.ts` 及对应测试；部署 bundle 仅同步 `worker/amsg/worker.bundle.js` 的局部生成结果，没有重排其他 Worker bundle。
 - 验证：相关 5 个测试文件共 275 项通过；Worker bundles 源码构建曾成功，最终手工保留的最小 bundle 差异另经 `node --check` 通过。全量 Vitest 为 210 个文件通过、1 个文件已有 2 项 `/debug` schema 诊断断言失败（3029/3031 通过），另因本地 `node_modules` 缺少 `jsdom` 有 1 个未处理环境错误；这些失败与本次文件无交集。Vite build 因本地缺少已在 lockfile 声明的 `@capacitor/push-notifications` 无法完成，不应描述为通过。
 - 尚需人工验证：在真实网络环境分别复现普通聊天、user key 和即时对话第一次 `Load failed` 后成功，确认不出现首次红色提示；确认两次即时对话 POST body/taskUuid 相同且最终只收到一条回复。此次不修改聊天存储、Memory Palace、备份格式或角色卡字段，也不读取或删除用户数据。
+
+## 11. 2026-08-10 上游 `ec7ad049` 同步
+
+- `master` 已合入上游 `ec7ad049`。上游新增主动消息 2.0 的 `llm_credentials` / `credRefs` 凭据引用、服务端消息账本补收、识图 API 完整设置、故事世界书修正及相关诊断；旧 Worker 继续走内联凭据兼容路径，新 Worker 由 `/init-tenant` 幂等补齐新表，不要求用户手工迁移 D1。
+- 唯一文本冲突位于 `utils/activeMsgClient.ts` 的即时对话发送段。解决方式是完整保留上游 credRefs：凭据值变化时先上传，常态指纹命中时零额外请求，`CREDENTIAL_NOT_FOUND` 仍只补传自愈一次；随后在同一条调用上保留 fork 的固定 task UUID 与一次 400ms 网络重放。两次网络 attempt 复用相同加密 body，Worker 继续将 `TASK_UUID_CONFLICT` 解释为首个请求已落库，避免重复消息。
+- `worker/amsg/src/instantChat.ts`、对应测试和 `worker/amsg/worker.bundle.js` 均由 Git 三方自动合并，已核对 `taskUuid` 校验、冲突转 202、上游 server `2.6.0-next.19` 与 `llm-credentials` 能力仍同时存在。没有改动 D1 绑定、Secrets、Cron、备份格式、Memory Palace 或聊天数据。
+- 本地 `pnpm install --frozen-lockfile` 已下载 lockfile 内容，但 Codex 的最小发布时间策略拒绝为 2026-08-09 发布的 `@rei-standard/amsg-client@2.9.0-next.11` 和 `@rei-standard/amsg-server@2.6.0-next.19` 建立项目链接；未放宽或绕过该策略。因此本地完成了合并文件的 esbuild 语法打包、最终 Worker bundle `node --check` 和 `git diff --check`，完整测试与生产构建以推送后的 GitHub Actions 干净环境为最终发布闸门，结果需在部署完成后回填。
+- 发布仍需同步两部分：GitHub Pages 前端与用户自己的 `sullyos-amsg` 主动消息 Worker。后者是个人 Worker，不是原作者公共 Worker；保留既有 D1、AMSG/VAPID Secrets、Cron 和 URL 原样覆盖代码即可。
