@@ -6,12 +6,9 @@
 //      响应没有 CORS 头」这四件完全不同的事，统统报成同一句 Failed to fetch，不带任何
 //      细节。用户把日志复制出来发到群里，信息量是零——这份文件的活就是把能补的旁证
 //      （耗时、在线状态、是否跨域、Resource Timing 里那条记录）全补上，再给一句初判。
-//   2. 其中最关键的一条旁证是「换 no-cors 再打一次这个域名」：no-cors 不做 CORS 校验，
-//      只要网络路径通就会拿到一个 opaque 响应。它成功而原请求失败 ⇒ 网络没问题，是响应
-//      头/CORS 的事（多半是对方挡在 Cloudflare 限流页或人机验证页后面）；它也失败 ⇒ 这台
-//      设备到这个域名是真的不通，该去查梯子规则 / DNS / 防火墙 / 扩展。这一刀把排查范围
-//      直接砍掉一半，是整份文件存在的理由。
-//   3. 判定全是纯函数，能脱开浏览器单测；探测那部分把 fetch 当参数传进来，测试塞假的。
+//   2. 判定全是纯函数，能脱开浏览器单测。文件末尾仍保留显式诊断可用的 no-cors 探测
+//      工具，但全局监听器不再自动调用：opaque 响应不能可靠证明具体是哪层故障，而且一次
+//      业务失败不应再额外制造网络请求。
 //
 // ⚠️ 探测必须用**未被拦截的原生 fetch**（拦截器里的 originalFetch），否则探测自己失败会
 // 再写一条日志，一条网络错误滚成一屏。
@@ -72,6 +69,21 @@ export const parseTargetUrl = (url: string, base?: string): { ok: boolean; origi
         return { ok: true, origin: parsed.origin, host: parsed.host, protocol: parsed.protocol, href: parsed.href };
     } catch {
         return { ok: false, origin: '', host: '', protocol: '', href: url };
+    }
+};
+
+/**
+ * AMSG client_state 写入的单次失败不等于最终失败：交互路径已有固定短重试，后台同步则会
+ * 保留脏数据后退避重排。全局 fetch 监听器只负责未知调用方的最终错误，不能抢先弹这一层。
+ */
+export const isCallerManagedClientStatePut = (url: string, method?: string): boolean => {
+    if ((method || 'GET').toUpperCase() !== 'PUT') return false;
+    const target = parseTargetUrl(url);
+    if (!target.ok) return false;
+    try {
+        return new URL(target.href).pathname.replace(/\/+$/, '').endsWith('/client-state');
+    } catch {
+        return false;
     }
 };
 
@@ -168,20 +180,15 @@ export const readResourceTimingHint = (
     return `Resource Timing: ${parts.join(', ') || '有记录'}${note}`;
 };
 
-/**
- * 「失败得多快」本身就是证据，而且是 JS 侧唯一能拿到的、区分「连接被吞」和「立刻被拒」
- * 的线索——这两种的排查方向完全相反：
- *   - 挂几秒到几十秒才失败 ⇒ TCP/TLS 握手没人应答（黑洞）。查代理分流规则、换节点。
- *   - 几十毫秒就失败 ⇒ 有人明确说不 。查 DNS、扩展、防火墙、混合内容。
- */
+/** 只陈述真实 fetch 等待时间；浏览器没有暴露失败阶段时，不根据时长硬猜 DNS/TLS/CORS。 */
 export const readStallHint = (durationMs?: number, kind?: FetchFailureKind): string => {
     if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) return '';
     if (kind && kind !== 'blocked' && kind !== 'timeout' && kind !== 'unknown') return '';
     if (durationMs >= 5000) {
-        return `耗时线索: 本次请求实际经过 ${(durationMs / 1000).toFixed(1)}s 后、仍在拿到响应头前失败 → 连接建立阶段被吞的可能性较高，不是「立刻被拒」。这种形态常见于该域名没走代理、或代理节点到上游无响应。优先换节点 / 把该域名显式加进代理规则。`;
+        return `耗时线索: 本次 fetch 实际等待了 ${(durationMs / 1000).toFixed(1)}s 后失败（这是实测经过时间，不是配置的 timeout 上限）。浏览器没有暴露具体失败阶段，仅凭时长无法区分代理、DNS、TLS、CORS 或上游网关。`;
     }
     if (durationMs <= 300) {
-        return `耗时线索: ${Math.round(durationMs)}ms 就失败，属于「立刻被拒」→ DNS 解析不到、浏览器扩展或防火墙在发出前拦掉、代理直接拒绝连接。不像是线路慢或被墙。`;
+        return `耗时线索: 本次 fetch 在 ${Math.round(durationMs)}ms 后失败（这是实测经过时间）。失败很快，但浏览器没有暴露具体阶段，不能仅凭时长断定是 DNS、扩展、代理还是 CORS。`;
     }
     return '';
 };

@@ -13,6 +13,7 @@ import {
     buildFetchFailureDetail,
     classifyFetchFailure,
     describeReachabilityProbe,
+    isCallerManagedClientStatePut,
     parseTargetUrl,
     probeOriginReachability,
     readResourceTimingHint,
@@ -147,7 +148,7 @@ describe('buildFetchFailureDetail', () => {
             pageProtocol: 'https:',
         }, { perf: { getEntriesByName: () => [] } });
         expect(text).toContain('请求超时');
-        expect(text).toContain('连接建立阶段被吞');
+        expect(text).toContain('不是配置的 timeout 上限');
         expect(text).not.toContain('不符合已知');
         expect(text).not.toContain('看下面的错误原文');
     });
@@ -168,19 +169,18 @@ describe('buildFetchFailureDetail', () => {
 });
 
 describe('readStallHint', () => {
-    it('挂了 20s 才失败 → 判成「连接被吞」，指向代理分流规则', () => {
+    it('挂了 20s 才失败 → 只报告真实时长，不硬猜网络阶段', () => {
         const hint = readStallHint(20187, 'blocked');
         expect(hint).toContain('20.2s');
-        expect(hint).toContain('连接建立阶段被吞');
-        expect(hint).toContain('代理');
-        expect(hint).toContain('不是「立刻被拒」');
-        expect(hint).not.toContain('DNS');
+        expect(hint).toContain('不是配置的 timeout 上限');
+        expect(hint).toContain('无法区分');
+        expect(hint).not.toContain('连接建立阶段被吞');
     });
 
-    it('几十毫秒就失败 → 判成「立刻被拒」，指向 DNS/扩展，不能提被墙', () => {
+    it('几十毫秒就失败 → 也只报告真实时长，不硬猜 DNS/扩展', () => {
         const hint = readStallHint(43, 'blocked');
-        expect(hint).toContain('立刻被拒');
-        expect(hint).toContain('DNS');
+        expect(hint).toContain('43ms');
+        expect(hint).toContain('不能仅凭时长断定');
         expect(hint).not.toContain('连接建立阶段被吞');
     });
 
@@ -191,6 +191,15 @@ describe('readStallHint', () => {
     it('已有确定结论的几类不掺和耗时猜测', () => {
         expect(readStallHint(20000, 'mixed-content')).toBe('');
         expect(readStallHint(20000, 'aborted')).toBe('');
+    });
+});
+
+describe('isCallerManagedClientStatePut', () => {
+    it('只识别由 AMSG 调用方负责重试/重排的 PUT /client-state', () => {
+        expect(isCallerManagedClientStatePut('https://worker.example.com/client-state', 'PUT')).toBe(true);
+        expect(isCallerManagedClientStatePut('https://worker.example.com/amsg/client-state/', 'put')).toBe(true);
+        expect(isCallerManagedClientStatePut('https://worker.example.com/client-state', 'GET')).toBe(false);
+        expect(isCallerManagedClientStatePut('https://worker.example.com/instant-chat', 'POST')).toBe(false);
     });
 });
 

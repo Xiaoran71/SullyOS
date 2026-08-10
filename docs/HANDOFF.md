@@ -132,11 +132,11 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 
 ## 10. 2026-08-10 瞬时网络失败体验修正
 
-- 普通聊天继续使用 `utils/safeApi.ts` 原有 retry（默认最多重试 2 次），没有叠加第二套重试。每个未到最终次数的网络失败由请求元数据标为 retry pending；`context/OSContext.tsx` 仍记录该 attempt 的后台 API 日志，但只在最终网络失败时写用户可见 `SYSTEM ERROR` 和执行既有 no-cors 复检。已有 HTTP 响应仍按原逻辑处理，400/401/403 等明确业务响应不被隐藏。
+- 普通聊天继续使用 `utils/safeApi.ts` 原有 retry（默认最多重试 2 次），没有叠加第二套重试。每个未到最终次数的网络失败由请求元数据标为 retry pending；`context/OSContext.tsx` 仍记录该 attempt 的后台 API 日志，但只在最终网络失败时写用户可见 `SYSTEM ERROR`。已有 HTTP 响应仍按原逻辑处理，400/401/403 等明确业务响应不被隐藏。
 - `GET /get-user-key` 仅在请求没有取得业务响应、被分类为网络失败或 timeout 时等待 400ms 重试一次。401/403、`INVALID_CLIENT_TOKEN` 等明确鉴权响应不重试，也不被改写成网络问题。检查未发现网络异常被主动改写为“key 无效”；原问题是该无副作用 GET 没有 retry，且全局网络日志会立即显示。
 - 即时对话调用链为 `hooks/useChatAI.ts` → `utils/amsgInstantChat.ts` → `utils/activeMsgClient.ts` → `POST /instant-chat` → `worker/amsg/src/instantChat.ts` → 上游 `PUT /client-state` / `POST /schedule-message`。此前外层 POST 没有 retry；现在只对没有 HTTP 响应的网络失败等待 400ms 重放一次，明确业务错误不重试。
 - 为避免 POST 重放产生两条即时消息，客户端复用上游既有的任务 `uuid` 和 D1 唯一索引：首次与重放请求共用完全相同的 body、task uuid 和 client task id。Worker 将同 uuid 的 `TASK_UUID_CONFLICT` 视为首次请求已落库并返回同一 202；旧 Worker 的同类冲突也由新客户端识别为已受理。没有新增表、去重服务或额外网络探测。
-- 网络失败耗时改用 `performance.now()` 计算单个实际 fetch attempt 的起点到抛错，不再受系统时钟跳变影响。Resource Timing 仅关联 startTime 与本次请求匹配的条目；无法可靠匹配时不显示旧条目。长耗时提示不再从 `transferSize=0` 断言“一个字节都没收到”，只依据真实 elapsed 提示在响应头前失败。
+- 网络失败耗时改用 `performance.now()` 计算单个实际 fetch attempt 的起点到抛错，不再受系统时钟跳变影响。Resource Timing 仅关联 startTime 与本次请求匹配的条目；无法可靠匹配时不显示旧条目。后续实测确认 `12020ms` / `28368ms` 是该次 fetch 的真实经过时间，不是 timeout 配置值；诊断文案不再仅凭时长断言“连接建立阶段被吞”，只陈述实测时间并明确浏览器没有暴露具体失败阶段。
 - 双日志排查结果：没有发现一次用户生成并发发送两条主聊天 POST。主聊天是一个 `safeFetchJson` 串行 retry 链；近似时间的两条记录可能来自后台 API 记录与用户可见网络日志两个入口，或确实是相邻的 retry attempt。另发现全局 fetch / console.error 拦截器此前没有卸载逻辑，Provider 经 StrictMode、HMR 或结构重挂载后可能再包一层，造成同一次失败被两个监听器记成同 timestamp；现以条件恢复原函数的局部 cleanup 修复。修改不改变后台 attempt 记录和正常 retry。
 - 重要文件：`context/OSContext.tsx`、`utils/safeApi.ts`、`utils/networkFailureDiagnosis.ts`、`utils/activeMsgClient.ts`、`worker/amsg/src/instantChat.ts` 及对应测试；部署 bundle 仅同步 `worker/amsg/worker.bundle.js` 的局部生成结果，没有重排其他 Worker bundle。
 - 验证：相关 5 个测试文件共 275 项通过；Worker bundles 源码构建曾成功，最终手工保留的最小 bundle 差异另经 `node --check` 通过。全量 Vitest 为 210 个文件通过、1 个文件已有 2 项 `/debug` schema 诊断断言失败（3029/3031 通过），另因本地 `node_modules` 缺少 `jsdom` 有 1 个未处理环境错误；这些失败与本次文件无交集。Vite build 因本地缺少已在 lockfile 声明的 `@capacitor/push-notifications` 无法完成，不应描述为通过。
@@ -149,3 +149,12 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - `worker/amsg/src/instantChat.ts`、对应测试和 `worker/amsg/worker.bundle.js` 均由 Git 三方自动合并，已核对 `taskUuid` 校验、冲突转 202、上游 server `2.6.0-next.19` 与 `llm-credentials` 能力仍同时存在。没有改动 D1 绑定、Secrets、Cron、备份格式、Memory Palace 或聊天数据。
 - 本地 `pnpm install --frozen-lockfile` 已下载 lockfile 内容，但 Codex 的最小发布时间策略拒绝为 2026-08-09 发布的 `@rei-standard/amsg-client@2.9.0-next.11` 和 `@rei-standard/amsg-server@2.6.0-next.19` 建立项目链接；未放宽或绕过该策略。因此本地完成了合并文件的 esbuild 语法打包、最终 Worker bundle `node --check` 和 `git diff --check`。GitHub Pages 对合并提交 `505509e8` 的干净环境安装与生产构建已成功；本轮未在本地补跑全量 Vitest，不能将其描述为已通过。
 - GitHub Pages 前端已经发布。用户自己的 `sullyos-amsg` 主动消息 / 即时对话 Worker 通过既有 `Xiaoran71/sullyos-workers` Git 集成同步，仅修改 `amsg/worker.bundle.js` 并产生部署仓库提交 `0b2f425a`；Cloudflare 构建成功，版本 `c9cd2f16` 已成为 100% 流量的 Active deployment。部署没有修改既有 D1、AMSG/VAPID Secrets、Cron 或 `sullyos-amsg.rlbxgkpl.workers.dev` URL；仍需用户在真实网络环境完成人工验收。
+
+## 12. 2026-08-10 网络日志二次收敛
+
+- 真实日志确认重复的全局拦截器记录已经消失，但 AMSG 前端 `PUT /client-state` 的单次网络失败仍会被全局监听器抢先展示。该请求的交互路径已有 `[0, 400, 1200]ms` 固定短重试，后台 fire pack / 工具配置 / 凭据同步则保留待传状态并按 `30s → 60s → 120s` 重排；聊天 presence 是非关键 best-effort。因此 `context/OSContext.tsx` 现在只对精确的 `PUT */client-state` 延后用户可见网络错误，保留调用方原有最终错误，不改 retry 次数、请求体或写入语义。
+- 普通聊天最终失败时出现的同 timestamp `Network: Load failed` + `Application: Load failed` 是同一异常的两个记录入口，不是第二条聊天 POST。全局 console 拦截器现在仅对“与刚写入的 Network message 完全相同、且在 1.5s 内”的 Application 镜像做日志面板去重；原始 `console.error` 仍照常输出，带上下文前缀或不同内容的应用错误不会被吞。
+- 全局网络失败不再自动执行 no-cors 连通性复检。该复检会额外发送一次请求，而且 opaque 成功/失败不足以可靠断定 CORS、限流页或代理阶段；相关纯工具暂留以减少无关删除，但不在正常失败链路调用。
+- `失败于 xxx ms` 继续使用单次 fetch 的 `performance.now()` 实测 elapsed。长短耗时提示已改为不做阶段归因，避免把真实等待时长进一步误译成“长时间握手 / 代理黑洞”。
+- 修改文件：`context/OSContext.tsx`、`utils/networkFailureDiagnosis.ts`、`utils/networkFailureDiagnosis.test.ts`、`docs/HANDOFF.md`。没有修改 Worker、聊天存储、Memory Palace、备份、D1、请求 body 或任务 UUID；本轮不需要重新部署主动消息 Worker，只需发布前端。
+- 验证：`utils/networkFailureDiagnosis.test.ts` 34/34 通过；全量 Vitest 214 个文件、3112 项测试全部通过；Worker bundles 与 Vite 生产构建通过；`git diff --check` 通过。仍需真实网络人工确认 `/client-state` 单次失败不再出现红色 Network 日志、普通聊天最终失败只保留一条 Network 诊断，以及成功 retry 不弹首次错误。
