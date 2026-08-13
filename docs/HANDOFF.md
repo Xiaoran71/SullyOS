@@ -168,4 +168,5 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - 依赖锁定内容通过 580 项供应链策略检查。由于大包 CDN 两次超时，最终使用同一 lockfile 以长超时、单并发完成下载；pnpm 因 `canvas@2.11.2` 构建脚本未审批返回非零，未执行或放宽该脚本，但所需依赖已安装且后续测试/构建均可运行。
 - 验证：全量 Vitest 259 个文件、3468 项测试全部通过；5 类 Worker bundle 构建成功；Vite 生产构建成功；`git diff --check` 通过。`pnpm build` 的外层 Codex 依赖预检因上述 canvas 审批提示未直接跑到 scripts，已分别执行其完全等价的 `node scripts/build-workers.mjs` 和 `vite build`，两者均通过。
 - 本轮不执行数据库迁移，不读取或删除浏览器数据，不改变快捷动作的备份/角色卡隐私边界。部署后仍需人工检查原聊天、Memory Palace、快捷动作真机跳转、Live2D/PDF 新功能及 AMSG 即时对话。
+- 合并提交 `41003393` 已推送到 `origin/master`。公开 GitHub Actions 状态徽章确认 `Deploy to GitHub Pages` 与 `Sync worker bundles to deploy repo` 均为 `passing`；前端发布和 Worker 部署仓库同步已完成。Cloudflare 上 AMSG Worker 的新部署版本/流量状态仍需在 Cloudflare 控制台或真实请求中确认。
 - 冲突减量结论：当前快捷动作已符合“独立模块 + 热点文件薄接入”；仍会稳定造成冲突的是 `OSContext.tsx`/网络诊断和 AMSG 修正。若要接近直接 sync，优先将这些通用修正以小 PR 回馈上游，上游合入后从 fork 删除对应补丁；不建议再造一套复杂 patch 重放系统。每周同步必须及时合入已验证 PR，避免再累积 110 个提交后一次处理。
