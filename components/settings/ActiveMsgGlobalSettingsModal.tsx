@@ -91,8 +91,14 @@ const REQUIRED_WORKER_FEATURES = [
 //   next.17 — 用户级 LLM 凭据表（PUT/GET/DELETE /llm-credentials）、任务的 credRefs、
 //            fire hook 的 resolveLlmCredential。这一档有独立 flag（上面那条
 //            'llm-credentials'），版本号列在这里只是备个案。
+//   next.20 — 推送被推送服务判死（410 / 404）时当终态，不再空转重试——投递是先生成
+//            后推送，每重试一跳就白跑一整轮 LLM；同时把状态码结构化写进 last_error
+//            的 pushStatus，体检的「这台设备」靠它拆穿「登记全绿但一条都不来」。
+//            另外 client_state 的前缀清理改走字典序范围：D1 把 LIKE pattern 压到
+//            50 字节（官方文档没写），key 一长就整条语句报 pattern too complex，
+//            同批的状态写入跟着一起回滚。
 // 不比版本的话，旧粘贴部署会被误判为最新，问题全在 worker 侧静默发生。
-const REQUIRED_WORKER_VERSION = '2.6.0-next.19';
+const REQUIRED_WORKER_VERSION = '2.6.0-next.20';
 
 /** 装着打包好的 worker 代码的部署仓库：fork 它 → 在 Cloudflare 连上 → 以后点 Sync fork 更新。 */
 const WORKERS_REPO_URL = 'https://github.com/Tosd0/sullyos-workers';
@@ -1445,7 +1451,9 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
 
         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="font-bold text-slate-700">通知权限</span>
+            <span className="font-bold text-slate-700">
+              {pushStatus?.transport === 'unified-push' ? 'UnifiedPush 通知' : '通知权限'}
+            </span>
             <span className={`text-xs font-bold ${pushStatus?.hasSubscription ? 'text-emerald-600' : 'text-amber-600'}`}>
               {pushStatus?.hasSubscription ? '已开启' : '未开启'}
             </span>
@@ -1453,10 +1461,27 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
           <p className="text-xs leading-relaxed text-slate-500">
             这是第二步。只有你真的想让角色在后台主动推送消息时，才需要点。
           </p>
-          <p className="text-xs leading-relaxed text-slate-500">
-            推送跟着「排程时所在的设备」走：每条任务到点后，推给保存这条排程时用的那台设备。
-            换了设备（或者换了浏览器）之后，在新设备上把排程重新保存一次，之后的推送就发到这台。
-          </p>
+          {pushStatus?.transport === 'unified-push' ? (
+            <p className="text-xs leading-relaxed text-slate-500">
+              Android App 通过开放的 UnifiedPush 收消息，不依赖 Firebase 或 Google 服务。
+              ntfy 只负责在后台唤醒本 App，AMSG Worker 仍是你自己部署的那一台。
+            </p>
+          ) : (
+            <p className="text-xs leading-relaxed text-slate-500">
+              推送跟着「排程时所在的设备」走：每条任务到点后，推给保存这条排程时用的那台设备。
+              换了设备（或者换了浏览器）之后，在新设备上把排程重新保存一次，之后的推送就发到这台。
+            </p>
+          )}
+          {pushStatus?.needsDistributor ? (
+            <a
+              href="https://docs.ntfy.sh/subscribe/phone/"
+              target="_blank"
+              rel="noreferrer"
+              className="block text-xs font-bold text-violet-600 underline"
+            >
+              安装并打开 ntfy（选择无 Firebase 版本）
+            </a>
+          ) : null}
           {pushStatus?.detail ? (
             <p className="text-xs leading-relaxed text-amber-600">{pushStatus.detail}</p>
           ) : null}
@@ -1465,7 +1490,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
             disabled={loading}
             className="w-full py-3 bg-violet-500 text-white font-bold rounded-2xl active:scale-95 transition-transform disabled:opacity-50"
           >
-            {loading ? '处理中...' : '开启通知与推送'}
+            {loading ? '处理中...' : pushStatus?.transport === 'unified-push' ? '连接 ntfy 并开启通知' : '开启通知与推送'}
           </button>
         </div>
 

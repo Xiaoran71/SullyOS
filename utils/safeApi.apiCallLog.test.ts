@@ -48,29 +48,30 @@ describe('safeFetchJson API log fallback', () => {
         }));
     });
 
-    it('marks retryable attempts so the global interceptor only surfaces the final failure', async () => {
-        vi.useFakeTimers();
-        try {
-            const fetchMock = vi.spyOn(globalThis, 'fetch')
-                .mockRejectedValueOnce(new TypeError('Load failed'))
-                .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-                    status: 200,
-                    headers: { 'content-type': 'application/json' },
-                }));
+    it('never retries a billable chat completion after a network failure', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
 
-            const pending = safeFetchJson(
-                'https://api.test/v1/chat/completions',
-                { method: 'POST', body: '{}' },
-                1,
-            );
-            await vi.advanceTimersByTimeAsync(1100);
-            await pending;
+        await expect(safeFetchJson(
+            'https://api.test/v1/chat/completions',
+            { method: 'POST', body: JSON.stringify({ model: 'paid-model', messages: [] }) },
+            2,
+        )).rejects.toThrow('Failed to fetch');
 
-            expect(fetchMock).toHaveBeenCalledTimes(2);
-            expect((fetchMock.mock.calls[0][1] as any).__sullyTransientRetryPending).toBe(true);
-            expect((fetchMock.mock.calls[1][1] as any).__sullyTransientRetryPending).toBe(false);
-        } finally {
-            vi.useRealTimers();
-        }
+        expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('never retries a billable chat completion after a retryable HTTP status', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+            JSON.stringify({ error: { message: 'upstream unavailable' } }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+        ));
+
+        await expect(safeFetchJson(
+            'https://api.test/v1/chat/completions',
+            { method: 'POST', body: JSON.stringify({ model: 'paid-model', messages: [] }) },
+            2,
+        )).rejects.toThrow('API Error 503');
+
+        expect(fetchMock).toHaveBeenCalledOnce();
     });
 });

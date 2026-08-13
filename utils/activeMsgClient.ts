@@ -99,10 +99,12 @@ import {
   SUBSCRIBE_SETTLE_MS,
   type SubscribeFailureKind,
 } from './pushSubscribeShared';
+import { isUnifiedPushPlatform } from './unifiedPushPlugin';
 
 export const NATIVE_PUSH_TOKEN_STORAGE_KEY = 'amsg2_fcm_token_v1';
 const nativePushBuildEnabled = () => import.meta.env.VITE_AMSG_NATIVE_PUSH === 'true';
 const readNativePushToken = () => nativePushBuildEnabled() && typeof localStorage !== 'undefined'
+  && !isUnifiedPushPlatform()
   ? localStorage.getItem(NATIVE_PUSH_TOKEN_STORAGE_KEY)?.trim() || ''
   : '';
 
@@ -112,6 +114,9 @@ export interface ActiveMsg2PushStatus {
   hasSubscription: boolean;
   vapidConfigured: boolean;
   detail?: string;
+  transport?: 'web-push' | 'unified-push';
+  distributor?: string | null;
+  needsDistributor?: boolean;
 }
 
 /** worker 上登记的那份订阅（一个用户一行）。读不到时调用方拿 null。 */
@@ -1264,6 +1269,29 @@ const decryptPayload = async (client: ReiClient, payload: { iv: string; authTag:
 };
 
 /**
+ * 即时对话能力探测这一次到底问到了什么。
+ *
+ * 「探不到」必须和「问到了、答案是不行」分开。混成同一个 false 的话，一次网络抖动
+ * （切代理节点、CF 边缘抖一下、D1 冷启动慢）就会把即时对话长期钉死在本地生成——存量
+ * 是粘的，只有下次探测成功才翻得回来，而重探只挂在握手和打开设置页两处，用户不进设置页
+ * 就一直卡着。线上真踩过：Worker 那头全绿，用户却连着几小时每一轮都在本地直连生成，
+ * 而他的本地直连根本不通，只看得到一条读不懂的网络报错，开关还写着「已开启」。
+ */
+export type InstantChatProbeOutcome =
+  /** 200 + instantTick:true —— 跑得动 */
+  | 'supported'
+  /** 200 但没有 instantTick —— 明确跑不动（老 bundle，或代码新了绑定没接上） */
+  | 'unsupported'
+  /** 压根没问到（网络异常、超时、401、5xx、网关页）—— 这不是答案，不能拿来判死刑 */
+  | 'unknown';
+
+export interface InstantChatProbeResult {
+  outcome: InstantChatProbeOutcome;
+  /** 探完之后真正生效的存量。unknown 时 = 探测前那份（原样不动，可能是 undefined）。 */
+  supported: boolean | undefined;
+}
+
+/**
  * 单条任务此刻的状态（`getRemoteTaskStatus` 的答案）。
  *   pending   —— 行在且还会跑（可能正在重试等待里，retryCount>0）
  *   completed —— 行在但已经出清（对一次性任务就等于失败：发成功的行会被删掉）
@@ -1348,6 +1376,40 @@ export const ActiveMsgClient = {
   async getPushStatus(): Promise<ActiveMsg2PushStatus> {
     const config = await ensureGlobalReady();
     const workerConfigured = Boolean(config.workerUrl.trim());
+    if (isUnifiedPushPlatform()) {
+      try {
+        const { getUnifiedPushStatus } = await import('./unifiedPushPlugin');
+        const status = await getUnifiedPushStatus();
+        const needsDistributor = !status.distributor && status.distributors.length === 0;
+        return {
+          supported: !needsDistributor,
+          permission: status.permission === 'prompt' ? 'default' : status.permission,
+          hasSubscription: Boolean(status.subscription),
+          vapidConfigured: workerConfigured,
+          transport: 'unified-push',
+          distributor: status.distributor,
+          needsDistributor,
+          detail: needsDistributor
+            ? '尚未检测到 UnifiedPush 服务。请先安装并打开 ntfy 的无 Firebase 版本。'
+            : status.lastError
+              ? `UnifiedPush：${status.lastError}`
+              : !workerConfigured
+                ? '请先填写 Worker 地址。'
+                : status.distributor
+                  ? `UnifiedPush 服务：${status.distributor}`
+                  : undefined,
+        };
+      } catch (error) {
+        return {
+          supported: false,
+          permission: 'unsupported',
+          hasSubscription: false,
+          vapidConfigured: workerConfigured,
+          transport: 'unified-push',
+          detail: `UnifiedPush 原生桥不可用：${(error as Error)?.message || error}`,
+        };
+      }
+    }
     // 能力检测与 instant push / proactive push 共用 describePushCapabilityGap：
     // 它会说清缺的是三件套里的哪一件，「不支持」这三个字用户拿着没法action。
     const capabilityGap = describePushCapabilityGap();
@@ -1371,10 +1433,19 @@ export const ActiveMsgClient = {
       hasSubscription: Boolean(subscription),
       vapidConfigured: workerConfigured,
       detail: !workerConfigured ? '请先填写 Worker 地址。' : undefined,
+      transport: 'web-push',
     };
   },
 
   async ensurePushSubscription() {
+    if (isUnifiedPushPlatform()) {
+      const config = await ensureWorkerReady();
+      const client = createClient(config);
+      const vapidPublicKey = await fetchWorkerVapidKey(client);
+      const { ensureUnifiedPushSubscription } = await import('./unifiedPushPlugin');
+      return ensureUnifiedPushSubscription(vapidPublicKey);
+    }
+
     // 只需要「支不支持」这一个判断，不走 getPushStatus——那会把 KeepAlive.init /
     // serviceWorker.ready / getSubscription 整套先跑一遍，下面又原样跑一次。
     const capabilityGap = describePushCapabilityGap();
@@ -1481,6 +1552,19 @@ export const ActiveMsgClient = {
    * 按钮要治的病，不能自己再犯一遍。
    */
   async resetPushSubscription(): Promise<void> {
+    if (isUnifiedPushPlatform()) {
+      const config = await ensureWorkerReady();
+      const client = await initializeClient(config);
+      try {
+        await client.deletePushSubscription();
+      } catch (error) {
+        console.warn('[ActiveMsg] UnifiedPush 重置：删除 Worker 旧订阅失败，继续覆盖', error);
+      }
+      const subscription = await this.ensurePushSubscription();
+      await client.putPushSubscription(subscription);
+      return;
+    }
+
     const config = await requirePushReady();
     const client = await initializeClient(config);
 
@@ -1509,6 +1593,11 @@ export const ActiveMsgClient = {
    * 的 D1 里、跟 SW 无关，不用像 proactive-push 那样重新推排程回去。
    */
   async deepResetPushSubscription(): Promise<void> {
+    if (isUnifiedPushPlatform()) {
+      await this.resetPushSubscription();
+      return;
+    }
+
     const config = await requirePushReady();
     const client = await initializeClient(config);
 
@@ -1555,6 +1644,21 @@ export const ActiveMsgClient = {
    * 返回值只为单测断言：'registered' 补了 / 'skipped' 条件不满足 / 'failed' 补失败了。
    */
   async reconcilePushSubscription(): Promise<'registered' | 'skipped' | 'failed'> {
+    if (isUnifiedPushPlatform()) {
+      try {
+        const { readUnifiedPushSubscription } = await import('./unifiedPushPlugin');
+        const subscription = await readUnifiedPushSubscription();
+        if (!subscription?.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) return 'skipped';
+        const config = await ensureWorkerReady();
+        const client = await initializeClient(config);
+        await client.putPushSubscription({ endpoint: subscription.endpoint, keys: subscription.keys });
+        return 'registered';
+      } catch (error) {
+        console.warn('[ActiveMsg] 连接后补登记 UnifiedPush 订阅失败', error);
+        return 'failed';
+      }
+    }
+
     try {
       if (describePushCapabilityGap()) return 'skipped';
       if (Notification.permission !== 'granted') return 'skipped';
@@ -1816,12 +1920,25 @@ export const ActiveMsgClient = {
     if (ids.length === 0) return;
     const config = await ensureWorkerReady();
     const client = await initializeClient(config);
+    let failed = 0;
+    let lastError: unknown = null;
     for (let i = 0; i < ids.length; i += OUTBOX_ACK_BATCH_SIZE) {
       const batch = ids.slice(i, i + OUTBOX_ACK_BATCH_SIZE);
-      const response = await client.ackOutbox(batch);
-      if (!response?.success) {
-        throw new Error(response?.error?.message || '云端消息账本销账失败。');
+      // 一批挂了继续跑后面几批：中途 throw 的话剩下的批次一条都销不掉，账本只会
+      // 越积越多，下一趟又整批拉回来。没销掉的那批下次拉回来有落库那层的去重挡着。
+      try {
+        const response = await client.ackOutbox(batch);
+        if (!response?.success) {
+          throw new Error(response?.error?.message || '云端消息账本销账失败。');
+        }
+      } catch (error) {
+        failed += batch.length;
+        lastError = error;
       }
+    }
+    if (failed > 0) {
+      const detail = lastError instanceof Error ? lastError.message : String(lastError);
+      throw new Error(`云端消息账本销账失败（${failed}/${ids.length} 条没销掉）：${detail}`);
     }
   },
 
@@ -2382,29 +2499,68 @@ export const ActiveMsgClient = {
    * 第一下常常是「代码新了、版本号也对上了、绑定却没接上」，这条路只能回 503。看版本号
    * 的话前端会一边说「已经是最新版」一边发一条挂一条。
    *
-   * 探不到一律 false（老 bundle 根本没这个字段，网络不通也是 false）：这一档会让即时对话
-   * 整个让位给本地生成，宁可少一个后台能力，也不要「开关亮着、发一条挂一条」。
+   * 「探不到」和「问到了、答案是不行」是两回事，只有后者才写进存量——详见
+   * InstantChatProbeOutcome 那段注释。返回值是**探完之后生效的存量**（探不到时
+   * 就是探测前那份），调用方只想要一个「现在能不能上云」时用这个签名即可；要分辨
+   * 这次到底问没问到，用 probeInstantChatSupportDetailed。
    *
    * 结论顺手存进全局配置（`instantChatSupported`）：真正拦下这一轮的是发消息那条路上的
-   * resolveInstantChatReadiness，而它不做逐调用网络探测，只认这份存量。所以每探一次就
-   * 刷一次，用户更新完 Worker 后下一次探测自然把它翻回来，不用手动去重开开关。
+   * resolveInstantChatReadiness，而它只认这份存量（外加存量为 false 时的一次现探）。
    */
-  async probeInstantChatSupport(): Promise<boolean> {
-    let supported = false;
+  async probeInstantChatSupport(options?: { timeoutMs?: number }): Promise<boolean> {
+    return (await this.probeInstantChatSupportDetailed(options)).supported === true;
+  },
+
+  /**
+   * 同上，但把「这次到底问到了什么」一并交出来。发消息路上的重探要靠它区分
+   * 「确认跑不动」（该提示去更新 Worker）和「这一刻连不上」（多半是网络，等会儿自己好）。
+   *
+   * timeoutMs：给现探用的护栏。握手时那次不传（不阻塞任何人），发消息路上那次必须传，
+   * 否则一条连不上的线路会把用户按在发送键上干等。
+   */
+  async probeInstantChatSupportDetailed(options?: { timeoutMs?: number }): Promise<InstantChatProbeResult> {
+    let previous: boolean | undefined;
+    try {
+      previous = (await ActiveMsgStore.getGlobalConfig()).instantChatSupported;
+    } catch {
+      previous = undefined;
+    }
+    let outcome: InstantChatProbeOutcome = 'unknown';
     try {
       const config = await ensureWorkerReady();
-      const { status, body } = await fetchWithAuthRaw('config-check', config, { method: 'GET' }, '即时对话能力探测');
-      supported = status === 200 && body?.success === true && body?.data?.instantTick === true;
+      const init: RequestInit = { method: 'GET' };
+      const timeoutMs = options?.timeoutMs;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (typeof timeoutMs === 'number' && timeoutMs > 0 && typeof AbortController !== 'undefined') {
+        const controller = new AbortController();
+        init.signal = controller.signal;
+        timer = setTimeout(() => controller.abort(), timeoutMs);
+      }
+      try {
+        const { status, body } = await fetchWithAuthRaw('config-check', config, init, '即时对话能力探测');
+        // 只有「200 + 这份 JSON 自称成功」才算问到了答案。401（密钥没填对）、5xx、
+        // 中间设备塞回来的网关页……说明的都是「这条线路/这份配置有问题」，而不是
+        // 「那台 Worker 跑不动即时对话」，一律留在 unknown。
+        if (status === 200 && body?.success === true) {
+          outcome = body?.data?.instantTick === true ? 'supported' : 'unsupported';
+        }
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     } catch {
-      supported = false;
+      // 网络异常 / 超时 / 中止：同上，不是答案。
+      outcome = 'unknown';
     }
+    // 探不到就什么都不写：存量保持原样。这一句就是「一次抖动 ≠ 长期降级」的全部。
+    if (outcome === 'unknown') return { outcome, supported: previous };
+    const supported = outcome === 'supported';
     try {
       await ActiveMsgStore.saveGlobalConfig({ instantChatSupported: supported });
     } catch (error) {
       // 存不下只是这一轮的判断留不到下次，探测结论本身照常返回。
       console.warn('[AmsgInstantChat] 能力探测结果没存下来（下次发消息按上一次的存量判断）', error);
     }
-    return supported;
+    return { outcome, supported };
   },
 
   /**

@@ -1,8 +1,8 @@
 # SullyOS Fork 长期维护交接
 
-> 最后更新：2026-08-10（Asia/Shanghai）
+> 最后更新：2026-08-14（Asia/Shanghai）
 > 维护对象：`Xiaoran71/SullyOS` 个人 fork
-> 当前上游基线：`ec7ad049`（`qegj567-cloud/SullyOS:master`）
+> 当前上游基线：`daefc4d1`（`qegj567-cloud/SullyOS:master`）
 > 发布分支：`master`（由 `codex/shortcut-clean-baseline-20260810` 验证后切换）
 
 ## 1. 当前目标
@@ -158,3 +158,14 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - `失败于 xxx ms` 继续使用单次 fetch 的 `performance.now()` 实测 elapsed。长短耗时提示已改为不做阶段归因，避免把真实等待时长进一步误译成“长时间握手 / 代理黑洞”。
 - 修改文件：`context/OSContext.tsx`、`utils/networkFailureDiagnosis.ts`、`utils/networkFailureDiagnosis.test.ts`、`docs/HANDOFF.md`。没有修改 Worker、聊天存储、Memory Palace、备份、D1、请求 body 或任务 UUID；本轮不需要重新部署主动消息 Worker，只需发布前端。
 - 验证：`utils/networkFailureDiagnosis.test.ts` 34/34 通过；全量 Vitest 214 个文件、3112 项测试全部通过；Worker bundles 与 Vite 生产构建通过；`git diff --check` 通过。仍需真实网络人工确认 `/client-state` 单次失败不再出现红色 Network 日志、普通聊天最终失败只保留一条 Network 诊断，以及成功 retry 不弹首次错误。
+
+## 13. 2026-08-14 上游 `daefc4d1` 同步
+
+- 从 `ec7ad049` 同步到 `daefc4d1`，共纳入 110 个上游提交、285 个变化文件。主要包括 Live2D/VRM 桌面陪伴与通话、房间备份及 Memory Palace 管线修复、主动消息补收与凭据更新、Android 更新、PDF 导入、iOS/PWA/Live2D 修复、故事剧场重复计费保护以及上游静态 Cloudflare 站点部署文件。
+- Git 实际只产生 3 个文本冲突：`context/OSContext.tsx`、`utils/networkFailureDiagnosis.ts`、`utils/safeApi.apiCallLog.test.ts`。快捷动作的 `apps/Chat.tsx`、`types.ts`、解析器、提示词、角色卡隐私和备份测试均由 Git 自动合并，已逐项核对接入仍在。
+- 冲突解决以上游新的“可能计费的 `/chat/completions` 不自动重放”为准，避免重复扣费；同时保留 fork 中无副作用 `GET /get-user-key` 的一次 400ms 网络重试、AMSG `/client-state` caller-managed 错误延后、单调时钟耗时和重复日志去重。同时纳入上游 Timing-Allow-Origin 正确判断与 MediaPipe 良性 stderr 过滤。
+- 上游新增的 Cloudflare 静态站点部署和隐私审计绑定上游账号/统计实例；两个 workflow 的 job 均加了 `github.repository == 'qegj567-cloud/SullyOS'` 归属条件，避免本 fork 因缺少上游 Cloudflare secret 假失败或误审计上游服务。本 fork 仍由 `deploy-pages.yml` 发布前端，并由 `sync-workers-repo.yml` 同步 Worker bundle。
+- 依赖锁定内容通过 580 项供应链策略检查。由于大包 CDN 两次超时，最终使用同一 lockfile 以长超时、单并发完成下载；pnpm 因 `canvas@2.11.2` 构建脚本未审批返回非零，未执行或放宽该脚本，但所需依赖已安装且后续测试/构建均可运行。
+- 验证：全量 Vitest 259 个文件、3468 项测试全部通过；5 类 Worker bundle 构建成功；Vite 生产构建成功；`git diff --check` 通过。`pnpm build` 的外层 Codex 依赖预检因上述 canvas 审批提示未直接跑到 scripts，已分别执行其完全等价的 `node scripts/build-workers.mjs` 和 `vite build`，两者均通过。
+- 本轮不执行数据库迁移，不读取或删除浏览器数据，不改变快捷动作的备份/角色卡隐私边界。部署后仍需人工检查原聊天、Memory Palace、快捷动作真机跳转、Live2D/PDF 新功能及 AMSG 即时对话。
+- 冲突减量结论：当前快捷动作已符合“独立模块 + 热点文件薄接入”；仍会稳定造成冲突的是 `OSContext.tsx`/网络诊断和 AMSG 修正。若要接近直接 sync，优先将这些通用修正以小 PR 回馈上游，上游合入后从 fork 删除对应补丁；不建议再造一套复杂 patch 重放系统。每周同步必须及时合入已验证 PR，避免再累积 110 个提交后一次处理。
