@@ -58,6 +58,7 @@ describe('safeFetchJson API log fallback', () => {
         )).rejects.toThrow('Failed to fetch');
 
         expect(fetchMock).toHaveBeenCalledOnce();
+        expect((fetchMock.mock.calls[0][1] as any).__sullyTransientRetryPending).toBe(false);
     });
 
     it('never retries a billable chat completion after a retryable HTTP status', async () => {

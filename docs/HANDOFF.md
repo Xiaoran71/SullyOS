@@ -170,3 +170,10 @@ PR 保留为最终安全闸。若将来启用 GitHub auto-merge，应同时要�
 - 本轮不执行数据库迁移，不读取或删除浏览器数据，不改变快捷动作的备份/角色卡隐私边界。部署后仍需人工检查原聊天、Memory Palace、快捷动作真机跳转、Live2D/PDF 新功能及 AMSG 即时对话。
 - 合并提交 `41003393` 已推送到 `origin/master`。公开 GitHub Actions 状态徽章确认 `Deploy to GitHub Pages` 与 `Sync worker bundles to deploy repo` 均为 `passing`；前端发布和 Worker 部署仓库同步已完成。Cloudflare 上 AMSG Worker 的新部署版本/流量状态仍需在 Cloudflare 控制台或真实请求中确认。
 - 冲突减量结论：当前快捷动作已符合“独立模块 + 热点文件薄接入”；仍会稳定造成冲突的是 `OSContext.tsx`/网络诊断和 AMSG 修正。若要接近直接 sync，优先将这些通用修正以小 PR 回馈上游，上游合入后从 fork 删除对应补丁；不建议再造一套复杂 patch 重放系统。每周同步必须及时合入已验证 PR，避免再累积 110 个提交后一次处理。
+
+## 14. 2026-08-14 冲突面收缩
+
+- 将无副作用 `GET /get-user-key` 的一次 400ms 网络重试从全局 `context/OSContext.tsx` fetch 拦截器移到 `utils/activeMsgClient.ts` 的 `client.init()` 边界。行为不变：只有没拿到业务响应的网络失败重试一次，401/明确业务失败不重试。全局拦截器恢复为每次调用只发一个物理 fetch，不再需要为该 GET 改写上游“计费请求不重放”守卫测试。
+- `safeFetchJson` 已按上游计算后的 `automaticRetryLimit` 标记“后续还有 retry”，不再使用调用者传入的旧 `maxRetries`。这避免计费聊天已被上游强制为零重试后，唯一也是最终一次网络失败仍被误当为“中间 attempt”隐藏。
+- 验证：新增 AMSG user-key 网络失败重试与 401 不重试覆盖，并补充计费请求最终 attempt 标记断言；全量 Vitest 259 个文件、3470 项测试全部通过；5 类 Worker bundle 与 Vite 生产构建通过；`git diff --check` 通过。构建产物与源码一致，未保留仅由本机 pnpm 路径造成的注释漂移。
+- 到此为止，剩余的差异要么是快捷动作产品定制，要么是已经解决过真实故障的拦截器 cleanup/日志去重/AMSG 幂等重放。继续抽象或移动它们需要大范围改写上游热点文件，冲突收益小且回归风险更高，因此不再继续细化。真正能进一步减少差异的路径是上游接受这些通用修正，之后从 fork 删除对应补丁。

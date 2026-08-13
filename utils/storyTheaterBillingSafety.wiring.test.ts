@@ -32,11 +32,8 @@ describe('story theater billing safety wiring', () => {
     it('does not silently issue a second physical chat completion request', () => {
         const interceptorSource = sliceBetween(osContextSource, 'const patchedFetch = async', 'window.fetch = patchedFetch;');
 
-        // The only second physical fetch is the explicitly guarded retry for the
-        // idempotent GET /get-user-key. Billable chat completions never enter it.
-        expect(interceptorSource.match(/await originalFetch\(/g) || []).toHaveLength(2);
+        expect(interceptorSource.match(/await originalFetch\(/g) || []).toHaveLength(1);
         expect(interceptorSource).toContain('await originalFetch(...sendArgs)');
-        expect(interceptorSource).toContain('if (!retryUserKeyOnce');
         expect(interceptorSource).not.toContain('回退原请求重发');
     });
 });

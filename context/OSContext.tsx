@@ -26,7 +26,7 @@ import { safeFetchJson } from '../utils/safeApi';
 import { captureApiRequestOnce, getApiCallAmbientContext, recordApiCall, setApiCallAmbientContext, updateApiRequestCaptureUsage } from '../utils/apiCallLog';
 import { isGlobalStreamEnabled, upgradeChatBodyToStream, assembleUpgradedResponse } from '../utils/streamUpgrade';
 import { rewriteStaleWorkerUrl } from '../utils/proxyWorker';
-import { buildFetchFailureDetail, classifyFetchFailure, isCallerManagedClientStatePut } from '../utils/networkFailureDiagnosis';
+import { buildFetchFailureDetail, isCallerManagedClientStatePut } from '../utils/networkFailureDiagnosis';
 import { INSTALLED_APPS, HIDDEN_APP_NAMES } from '../constants';
 import { isAnalyticsRequestUrl, trackEvent, trackDataScaleOnce, trackCurrentAppearanceOnce, trackCurrentCharSettingsOnce, trackCurrentFeaturesOnce } from '../utils/analytics';
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync } from '../utils/analyticsSnapshot';
@@ -1074,10 +1074,6 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const requestMethod = (typeof Request !== 'undefined' && resource instanceof Request)
               ? resource.method.toUpperCase()
               : ((config as RequestInit | undefined)?.method || 'GET').toUpperCase();
-          const retryUserKeyOnce = requestMethod === 'GET' && (() => {
-              try { return new URL(urlStr, window.location.href).pathname.endsWith('/get-user-key'); }
-              catch { return false; }
-          })();
           // 失败诊断要按发起时刻去 Resource Timing 里认领本次那条记录，而 entry.startTime 跟
           // performance.now() 同一条时间轴、跟 Date.now() 不是——两者不能混用，详见
           // utils/networkFailureDiagnosis.ts 的 readResourceTimingHint。
@@ -1126,18 +1122,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           try {
-              let response: Response;
-              try {
-                  response = await originalFetch(...sendArgs);
-              } catch (error) {
-                  const kind = classifyFetchFailure({ url: urlStr, error });
-                  if (!retryUserKeyOnce || (kind !== 'blocked' && kind !== 'timeout')) throw error;
-                  // get-user-key 是无副作用 GET。只在没拿到业务响应时短重试一次；401/403
-                  // 会正常返回 Response，不会走这里，也就不会被当成瞬时网络问题吞掉。
-                  await new Promise(resolve => setTimeout(resolve, 400));
-                  fetchStartedAt = monotonicNow();
-                  response = await originalFetch(...sendArgs);
-              }
+              let response = await originalFetch(...sendArgs);
 
               // /chat/completions 是可能已经开始计费的请求。拿到任何 HTTP 响应后都不在
               // 兼容层静默重发：中转站可能在返回错误前已经把任务交给上游，重发会让用户

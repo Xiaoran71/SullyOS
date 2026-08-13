@@ -387,10 +387,19 @@ const invalidateClientCache = () => { cachedClientEntry = null; };
 
 const createAndInitClient = async (config: ActiveMsg2GlobalConfig) => {
   const client = createClient(config);
-  try {
-    await client.init();
-  } catch (error) {
-    throw normalizeActiveMsgApiError(error, '获取用户密钥', config.workerUrl);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await client.init();
+      return client;
+    } catch (error) {
+      const failure = describeAmsgFetchFailure(error, '获取用户密钥', config.workerUrl);
+      if (attempt > 0 || failure.kind !== '网络失败') {
+        throw normalizeActiveMsgApiError(error, '获取用户密钥', config.workerUrl);
+      }
+      // init() 内部是无副作用的 GET /get-user-key。重试放在 AMSG 边界，
+      // 避免全局 fetch 拦截器识别业务 URL 并引入第二次物理请求。
+      await delay(400);
+    }
   }
   return client;
 };

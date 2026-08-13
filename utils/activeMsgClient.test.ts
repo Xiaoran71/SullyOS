@@ -544,6 +544,25 @@ describe('连接前的 worker 配置自检', () => {
 
     expect(reiClient.init).toHaveBeenCalledTimes(2);
   });
+
+  it('get-user-key 第一次网络失败时只在 AMSG 边界短重试一次', async () => {
+    routeFetch({});
+    reiClient.init.mockReset()
+      .mockRejectedValueOnce(new TypeError('Load failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(runWithTimers(ActiveMsgClient.connect())).resolves.toMatchObject({ ok: true });
+    expect(reiClient.init).toHaveBeenCalledTimes(2);
+  });
+
+  it('get-user-key 明确业务失败不重试', async () => {
+    routeFetch({});
+    const authError = Object.assign(new Error('INVALID_CLIENT_TOKEN'), { status: 401 });
+    reiClient.init.mockReset().mockRejectedValue(authError);
+
+    await expect(ActiveMsgClient.connect()).rejects.toThrow('INVALID_CLIENT_TOKEN');
+    expect(reiClient.init).toHaveBeenCalledOnce();
+  });
 });
 
 // 回归守卫：老 worker（< 2.6.0-next.5）的 GET /messages 不投影 charId，按角色过滤会

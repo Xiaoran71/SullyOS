@@ -378,7 +378,7 @@ export async function safeFetchJson(
             __sullyApiCallId: requestId,
             // 全局 fetch 拦截器仍记录这次 attempt，但上层还有 retry 时不立刻点亮
             // SYSTEM ERROR；最后一次失败才给用户看。该字段只在本页读取，原生 fetch 会忽略。
-            __sullyTransientRetryPending: attempt < maxRetries,
+            __sullyTransientRetryPending: attempt < automaticRetryLimit,
         } as RequestInit;
         let timeoutHandle: any = null;
         if (timeoutMs > 0) {
